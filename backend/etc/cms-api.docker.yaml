@@ -1,0 +1,20 @@
+Name: cms-api
+Host: 0.0.0.0
+Port: 8888
+
+Mysql:
+  Dsn: "cms:cms@tcp(mysql:3306)/cms?charset=utf8mb4&parseTime=True&loc=Local"
+
+Auth:
+  Username: "teacher"
+  PasswordHash: "$2a$10$L4HtI9LTmoWAZUa6fGhUaOmEacea/T3w7xFW4plRmTttDuhemZo.6"
+  JwtSecret: "replace-me-in-production"
+  JwtExpireSec: 86400
+
+App:
+  RecentScoreItemsN: 10
+  RankingTopN: 5
+
+Retention:
+  ScoreEntryDays: 30
+  CleanupEverySec: 3600

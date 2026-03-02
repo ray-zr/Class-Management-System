@@ -1,0 +1,8 @@
+.git
+backend/etc
+backend/etc/*.yaml
+backend/etc/*.yml
+**/*.log
+**/*.tmp
+**/.DS_Store
+**/node_modules

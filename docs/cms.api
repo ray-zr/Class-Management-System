@@ -1,0 +1,280 @@
+syntax = "v1"
+
+info (
+	title:   "Class Management System"
+	desc:    "Smart class management system API"
+	author:  "hephaestus"
+	version: "v0.1.0"
+)
+
+type (
+	// Common
+	Empty  {}
+	PageReq {
+		Page int64 `form:"page,optional" json:"page,optional"`
+		Size int64 `form:"size,optional" json:"size,optional"`
+	}
+	// Auth
+	LoginReq {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	LoginResp {
+		AccessToken string `json:"accessToken"`
+		ExpireAt    int64  `json:"expireAt"`
+	}
+	MeResp {
+		Username string `json:"username"`
+	}
+	// Student
+	StudentCreateReq {
+		StudentNo string `json:"studentNo"`
+		Name      string `json:"name"`
+		Gender    string `json:"gender"`
+		Phone     string `json:"phone"`
+		Position  string `json:"position"`
+	}
+	StudentUpdateReq {
+		StudentNo string `json:"studentNo,optional"`
+		Name      string `json:"name,optional"`
+		Gender    string `json:"gender,optional"`
+		Phone     string `json:"phone,optional"`
+		Position  string `json:"position,optional"`
+		GroupId   int64  `json:"groupId,optional"`
+	}
+	StudentResp {
+		Id         int64  `json:"id"`
+		StudentNo  string `json:"studentNo"`
+		Name       string `json:"name"`
+		Gender     string `json:"gender"`
+		Phone      string `json:"phone"`
+		Position   string `json:"position"`
+		GroupId    int64  `json:"groupId"`
+		TotalScore int64  `json:"totalScore"`
+		CreatedAt  int64  `json:"createdAt"`
+		UpdatedAt  int64  `json:"updatedAt"`
+	}
+	StudentListReq {
+		PageReq
+		Keyword string `form:"keyword,optional" json:"keyword,optional"`
+		GroupId int64  `form:"groupId,optional" json:"groupId,optional"`
+	}
+	StudentListResp {
+		Total int64         `json:"total"`
+		Items []StudentResp `json:"items"`
+	}
+	// Group
+	GroupCreateReq {
+		Name string `json:"name"`
+	}
+	GroupUpdateReq {
+		Name string `json:"name"`
+	}
+	GroupResp {
+		Id        int64  `json:"id"`
+		Name      string `json:"name"`
+		AvgScore  int64  `json:"avgScore"`
+		CreatedAt int64  `json:"createdAt"`
+		UpdatedAt int64  `json:"updatedAt"`
+	}
+	GroupListResp {
+		Items []GroupResp `json:"items"`
+	}
+	// Score dimensions & items
+	DimensionCreateReq {
+		Name string `json:"name"`
+	}
+	DimensionUpdateReq {
+		Name string `json:"name"`
+	}
+	DimensionResp {
+		Id   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	DimensionListResp {
+		Items []DimensionResp `json:"items"`
+	}
+	ScoreItemCreateReq {
+		DimensionId int64  `json:"dimensionId"`
+		Name        string `json:"name"`
+		Score       int64  `json:"score"`
+	}
+	ScoreItemUpdateReq {
+		DimensionId int64  `json:"dimensionId"`
+		Name        string `json:"name"`
+		Score       int64  `json:"score"`
+	}
+	ScoreItemResp {
+		Id          int64  `json:"id"`
+		DimensionId int64  `json:"dimensionId"`
+		Name        string `json:"name"`
+		Score       int64  `json:"score"`
+	}
+	ScoreItemListReq {
+		DimensionId int64 `form:"dimensionId,optional" json:"dimensionId,optional"`
+	}
+	ScoreItemListResp {
+		Items []ScoreItemResp `json:"items"`
+	}
+	RecentScoreItemsResp {
+		Items []ScoreItemResp `json:"items"`
+	}
+	// Score entries
+	ScoreEntryCreateReq {
+		Scope       string `json:"scope"` // student|group|class
+		TargetId    int64  `json:"targetId,optional"` // studentId or groupId, when applicable
+		ScoreItemId int64  `json:"scoreItemId"`
+		Remark      string `json:"remark,optional"`
+	}
+	ScoreEntryResp {
+		Id          int64  `json:"id"`
+		StudentId   int64  `json:"studentId"`
+		GroupId     int64  `json:"groupId"`
+		DimensionId int64  `json:"dimensionId"`
+		ScoreItemId int64  `json:"scoreItemId"`
+		Score       int64  `json:"score"`
+		Remark      string `json:"remark"`
+		CreatedAt   int64  `json:"createdAt"`
+	}
+	ScoreEntryListReq {
+		PageReq
+		StudentId int64 `form:"studentId,optional" json:"studentId,optional"`
+		GroupId   int64 `form:"groupId,optional" json:"groupId,optional"`
+		SinceDays int64 `form:"sinceDays,optional" json:"sinceDays,optional"` // default 30
+	}
+	ScoreEntryListResp {
+		Total int64            `json:"total"`
+		Items []ScoreEntryResp `json:"items"`
+	}
+	// Rankings
+	RankingReq {
+		Month       string `form:"month,optional" json:"month,optional"` // YYYY-MM, default current month
+		Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, month/dimensionId are ignored
+		DimensionId int64  `form:"dimensionId,optional" json:"dimensionId,optional"`
+		TopN        int64  `form:"topN,optional" json:"topN,optional"`
+	}
+	StudentRankResp {
+		Rank      int64       `json:"rank"`
+		Highlight bool        `json:"highlight"`
+		Student   StudentResp `json:"student"`
+		Score     int64       `json:"score"`
+	}
+	RankingResp {
+		Items []StudentRankResp `json:"items"`
+	}
+	// Rollcall
+	RollcallStartReq {
+		Fair bool `json:"fair"`
+	}
+	RollcallPickResp {
+		RoundId   string      `json:"roundId"`
+		Student   StudentResp `json:"student"`
+		Remaining int64       `json:"remaining"`
+	}
+	RollcallResetReq {
+		RoundId string `json:"roundId"`
+	}
+)
+
+@server (
+	prefix: /api
+)
+service cms-api {
+	// Health
+	@handler Health
+	get /health returns (Empty)
+
+	// Auth
+	@handler Login
+	post /auth/login (LoginReq) returns (LoginResp)
+
+	// Auth required (enforced by middleware in code)
+	@handler Me
+	get /auth/me returns (MeResp)
+
+	// Students
+	@handler StudentCreate
+	post /students (StudentCreateReq) returns (StudentResp)
+
+	@handler StudentList
+	get /students (StudentListReq) returns (StudentListResp)
+
+	@handler StudentGet
+	get /students/:id returns (StudentResp)
+
+	@handler StudentUpdate
+	put /students/:id (StudentUpdateReq) returns (StudentResp)
+
+	@handler StudentDelete
+	delete /students/:id returns (Empty)
+
+	@handler StudentImport
+	post /students/import returns (Empty)
+
+	// Groups
+	@handler GroupCreate
+	post /groups (GroupCreateReq) returns (GroupResp)
+
+	@handler GroupList
+	get /groups returns (GroupListResp)
+
+	@handler GroupUpdate
+	put /groups/:id (GroupUpdateReq) returns (GroupResp)
+
+	@handler GroupDelete
+	delete /groups/:id returns (Empty)
+
+	// Dimensions
+	@handler DimensionCreate
+	post /dimensions (DimensionCreateReq) returns (DimensionResp)
+
+	@handler DimensionList
+	get /dimensions returns (DimensionListResp)
+
+	@handler DimensionUpdate
+	put /dimensions/:id (DimensionUpdateReq) returns (DimensionResp)
+
+	@handler DimensionDelete
+	delete /dimensions/:id returns (Empty)
+
+	// Score items
+	@handler ScoreItemCreate
+	post /score-items (ScoreItemCreateReq) returns (ScoreItemResp)
+
+	@handler ScoreItemList
+	get /score-items (ScoreItemListReq) returns (ScoreItemListResp)
+
+	@handler ScoreItemUpdate
+	put /score-items/:id (ScoreItemUpdateReq) returns (ScoreItemResp)
+
+	@handler ScoreItemDelete
+	delete /score-items/:id returns (Empty)
+
+	@handler ScoreItemRecent
+	get /score-items/recent returns (RecentScoreItemsResp)
+
+	// Score entries
+	@handler ScoreEntryCreate
+	post /score-entries (ScoreEntryCreateReq) returns (ScoreEntryResp)
+
+	@handler ScoreEntryList
+	get /score-entries (ScoreEntryListReq) returns (ScoreEntryListResp)
+
+	// Rankings
+	@handler Ranking
+	get /rankings/students returns (RankingResp)
+
+	@handler RankingExport
+	get /rankings/students/export returns (Empty)
+
+	// Rollcall
+	@handler RollcallStart
+	post /rollcall/start (RollcallStartReq) returns (RollcallPickResp)
+
+	@handler RollcallPick
+	post /rollcall/pick returns (RollcallPickResp)
+
+	@handler RollcallReset
+	post /rollcall/reset (RollcallResetReq) returns (Empty)
+}
+
