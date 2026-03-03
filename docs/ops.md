@@ -1,5 +1,7 @@
 # 运维与部署指南（本机云服务器）
 
+更详细的运维手册（含宕机恢复、备份恢复、修改账号密码）见：`docs/ops_runbook.md`。
+
 ## 依赖
 
 - Docker / Docker Compose
