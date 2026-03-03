@@ -104,8 +104,29 @@ const appState = {
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
   rollcall: { roundId: "", student: null, remaining: 0 },
-  timer: { mode: "countdown", running: false, targetMs: 5 * 60 * 1000, leftMs: 5 * 60 * 1000, lastTick: 0 },
+  timer: {
+    mode: "countdown",
+    running: false,
+    targetMs: 5 * 60 * 1000,
+    leftMs: 5 * 60 * 1000,
+    lastTick: 0,
+    timeoutId: 0,
+  },
 };
+
+function stopTimerLoop() {
+  if (appState.timer.timeoutId) {
+    clearTimeout(appState.timer.timeoutId);
+    appState.timer.timeoutId = 0;
+  }
+}
+
+function syncTimerUI() {
+  const clock = document.getElementById("timer-clock");
+  if (clock) clock.textContent = fmtClock(appState.timer.leftMs);
+  const btn = document.getElementById("timer-start-btn");
+  if (btn) btn.textContent = appState.timer.running ? "暂停" : "开始";
+}
 
 function clearScoreDraft() {
   appState.scoreDraft = { scope: "student", targetId: 0 };
@@ -1472,18 +1493,26 @@ function viewRankings() {
 }
 
 function timerTick() {
-  if (!appState.timer.running) return;
+  stopTimerLoop();
+  if (!appState.timer.running) {
+    syncTimerUI();
+    return;
+  }
+
   const now = Date.now();
-  const dt = now - appState.timer.lastTick;
+  const dt = Math.max(0, now - appState.timer.lastTick);
   appState.timer.lastTick = now;
+
   if (appState.timer.mode === "countdown") {
     appState.timer.leftMs = Math.max(0, appState.timer.leftMs - dt);
     if (appState.timer.leftMs === 0) appState.timer.running = false;
   } else {
     appState.timer.leftMs = appState.timer.leftMs + dt;
   }
-  render();
-  requestAnimationFrame(timerTick);
+
+  syncTimerUI();
+
+  appState.timer.timeoutId = setTimeout(timerTick, 200);
 }
 
 function viewTimer() {
@@ -1495,6 +1524,7 @@ function viewTimer() {
   mode.addEventListener("change", () => {
     appState.timer.mode = mode.value;
     appState.timer.running = false;
+    stopTimerLoop();
     appState.timer.leftMs = appState.timer.mode === "countdown" ? appState.timer.targetMs : 0;
     render();
   });
@@ -1509,6 +1539,7 @@ function viewTimer() {
         appState.timer.targetMs = m * 60 * 1000;
         appState.timer.leftMs = appState.timer.targetMs;
         appState.timer.running = false;
+        stopTimerLoop();
         render();
       },
     })
@@ -1517,11 +1548,18 @@ function viewTimer() {
   const start = el("button", {
     class: "btn btn-amber",
     text: appState.timer.running ? "暂停" : "开始",
+    id: "timer-start-btn",
     onclick: () => {
       appState.timer.running = !appState.timer.running;
       appState.timer.lastTick = Date.now();
-      render();
-      if (appState.timer.running) requestAnimationFrame(timerTick);
+      if (!appState.timer.running) {
+        stopTimerLoop();
+        syncTimerUI();
+        return;
+      }
+
+      syncTimerUI();
+      timerTick();
     },
   });
   const reset = el("button", {
@@ -1529,6 +1567,7 @@ function viewTimer() {
     text: "重置",
     onclick: () => {
       appState.timer.running = false;
+      stopTimerLoop();
       appState.timer.leftMs = appState.timer.mode === "countdown" ? appState.timer.targetMs : 0;
       render();
     },
@@ -1557,7 +1596,7 @@ function viewTimer() {
     ]),
     el("div", { class: "card timer" }, [
       el("h2", { text: "显示" }),
-      el("div", { class: "clock", text: fmtClock(appState.timer.leftMs) }),
+      el("div", { class: "clock", id: "timer-clock", text: fmtClock(appState.timer.leftMs) }),
       el("div", { class: "row", style: "justify-content:center" }, [start, reset, fs]),
     ]),
   ]);
