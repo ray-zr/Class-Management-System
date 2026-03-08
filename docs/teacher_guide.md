@@ -69,6 +69,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 - `POST /api/score-entries` 录入积分
 - `GET /api/score-entries` 查询最近 30 天明细
+- `DELETE /api/score-entries/:id` 撤销一条积分明细（会回滚该条记录对学生总分的影响）
 
 系统会在后台定时清理超过 30 天的明细，但不影响总分统计。
 

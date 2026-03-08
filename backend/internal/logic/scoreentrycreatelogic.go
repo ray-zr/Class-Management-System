@@ -15,6 +15,7 @@ import (
 	"class-management-system/backend/internal/types"
 
 	"github.com/zeromicro/go-zero/core/logx"
+	"gorm.io/gorm"
 )
 
 type ScoreEntryCreateLogic struct {
@@ -41,39 +42,50 @@ func (l *ScoreEntryCreateLogic) ScoreEntryCreate(req *types.ScoreEntryCreateReq)
 	}
 
 	createForStudent := func(studentID int64) (*types.ScoreEntryResp, error) {
-		s, err := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
+		var out *types.ScoreEntryResp
+		err := l.svcCtx.DB.WithContext(l.ctx).Transaction(func(tx *gorm.DB) error {
+			studentRepo := repository.NewStudentRepo(tx)
+			scoreEntryRepo := repository.NewScoreEntryRepo(tx)
+			recentRepo := repository.NewRecentScoreItemRepo(tx)
+
+			s, err := studentRepo.Get(l.ctx, studentID)
+			if err != nil {
+				return err
+			}
+			e := &model.ScoreEntry{
+				StudentID:   s.ID,
+				GroupID:     s.GroupID,
+				DimensionID: it.DimensionID,
+				ScoreItemID: it.ID,
+				Score:       it.Score,
+				Remark:      req.Remark,
+			}
+			if err := scoreEntryRepo.Create(l.ctx, e); err != nil {
+				return err
+			}
+			if err := recentRepo.Touch(l.ctx, it.ID, time.Now()); err != nil {
+				return err
+			}
+			if _, err := studentRepo.Update(l.ctx, s.ID, map[string]any{"total_score": gorm.Expr("total_score + ?", it.Score)}); err != nil {
+				return err
+			}
+
+			out = &types.ScoreEntryResp{
+				Id:          e.ID,
+				StudentId:   e.StudentID,
+				GroupId:     e.GroupID,
+				DimensionId: e.DimensionID,
+				ScoreItemId: e.ScoreItemID,
+				Score:       e.Score,
+				Remark:      e.Remark,
+				CreatedAt:   e.CreatedAt.Unix(),
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		e := &model.ScoreEntry{
-			StudentID:   s.ID,
-			GroupID:     s.GroupID,
-			DimensionID: it.DimensionID,
-			ScoreItemID: it.ID,
-			Score:       it.Score,
-			Remark:      req.Remark,
-		}
-		if err := l.svcCtx.ScoreEntryRepo.Create(l.ctx, e); err != nil {
-			return nil, err
-		}
-		if err := l.svcCtx.RecentScoreItemRepo.Touch(l.ctx, it.ID, time.Now()); err != nil {
-			return nil, err
-		}
-		newTotal := s.TotalScore + it.Score
-		_, err = l.svcCtx.StudentRepo.Update(l.ctx, s.ID, map[string]any{"total_score": newTotal})
-		if err != nil {
-			return nil, err
-		}
-		return &types.ScoreEntryResp{
-			Id:          e.ID,
-			StudentId:   e.StudentID,
-			GroupId:     e.GroupID,
-			DimensionId: e.DimensionID,
-			ScoreItemId: e.ScoreItemID,
-			Score:       e.Score,
-			Remark:      e.Remark,
-			CreatedAt:   e.CreatedAt.Unix(),
-		}, nil
+		return out, nil
 	}
 
 	switch req.Scope {

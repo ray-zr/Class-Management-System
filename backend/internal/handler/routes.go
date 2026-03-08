@@ -105,6 +105,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Handler: ScoreEntryListHandler(serverCtx),
 			},
 			{
+				Method:  http.MethodDelete,
+				Path:    "/score-entries/:id",
+				Handler: ScoreEntryDeleteHandler(serverCtx),
+			},
+			{
 				Method:  http.MethodPost,
 				Path:    "/score-items",
 				Handler: ScoreItemCreateHandler(serverCtx),

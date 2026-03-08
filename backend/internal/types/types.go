@@ -32,11 +32,11 @@ type GroupListResp struct {
 }
 
 type GroupResp struct {
-	Id        int64  `json:"id"`
-	Name      string `json:"name"`
-	AvgScore  int64  `json:"avgScore"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	Id        int64   `json:"id"`
+	Name      string  `json:"name"`
+	AvgScore  float64 `json:"avgScore"`
+	CreatedAt int64   `json:"createdAt"`
+	UpdatedAt int64   `json:"updatedAt"`
 }
 
 type GroupUpdateReq struct {

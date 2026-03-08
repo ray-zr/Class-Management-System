@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"math"
 
 	"class-management-system/backend/internal/model"
 
@@ -52,13 +54,17 @@ func (r *GroupRepo) Delete(ctx context.Context, id int64) error {
 	})
 }
 
-func (r *GroupRepo) AvgScore(ctx context.Context, groupID int64) (int64, error) {
-	var avg *float64
-	if err := r.db.WithContext(ctx).Model(&model.Student{}).Where("group_id = ?", groupID).Select("avg(total_score)").Scan(&avg).Error; err != nil {
+func (r *GroupRepo) AvgScore(ctx context.Context, groupID int64) (float64, error) {
+	var avg sql.NullFloat64
+	if err := r.db.WithContext(ctx).
+		Model(&model.Student{}).
+		Where("group_id = ?", groupID).
+		Select("avg(total_score)").
+		Scan(&avg).Error; err != nil {
 		return 0, err
 	}
-	if avg == nil {
+	if !avg.Valid {
 		return 0, nil
 	}
-	return int64(*avg + 0.5), nil
+	return math.Round(avg.Float64*100) / 100, nil
 }

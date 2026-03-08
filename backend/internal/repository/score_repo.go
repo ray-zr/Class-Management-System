@@ -182,6 +182,18 @@ func (r *ScoreEntryRepo) Create(ctx context.Context, e *model.ScoreEntry) error 
 	return r.db.WithContext(ctx).Create(e).Error
 }
 
+func (r *ScoreEntryRepo) Get(ctx context.Context, id int64) (*model.ScoreEntry, error) {
+	var e model.ScoreEntry
+	if err := r.db.WithContext(ctx).First(&e, id).Error; err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+func (r *ScoreEntryRepo) Delete(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&model.ScoreEntry{}, id).Error
+}
+
 type ScoreEntryListFilter struct {
 	StudentID int64
 	GroupID   int64

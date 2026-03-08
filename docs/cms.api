@@ -71,11 +71,11 @@ type (
 		Name string `json:"name"`
 	}
 	GroupResp {
-		Id        int64  `json:"id"`
-		Name      string `json:"name"`
-		AvgScore  int64  `json:"avgScore"`
-		CreatedAt int64  `json:"createdAt"`
-		UpdatedAt int64  `json:"updatedAt"`
+		Id        int64   `json:"id"`
+		Name      string  `json:"name"`
+		AvgScore  float64 `json:"avgScore"`
+		CreatedAt int64   `json:"createdAt"`
+		UpdatedAt int64   `json:"updatedAt"`
 	}
 	GroupListResp {
 		Items []GroupResp `json:"items"`
@@ -260,6 +260,9 @@ service cms-api {
 	@handler ScoreEntryList
 	get /score-entries (ScoreEntryListReq) returns (ScoreEntryListResp)
 
+	@handler ScoreEntryDelete
+	delete /score-entries/:id returns (Empty) // revoke one score entry
+
 	// Rankings
 	@handler Ranking
 	get /rankings/students returns (RankingResp)
@@ -277,4 +280,3 @@ service cms-api {
 	@handler RollcallReset
 	post /rollcall/reset (RollcallResetReq) returns (Empty)
 }
-

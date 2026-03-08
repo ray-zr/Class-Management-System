@@ -100,10 +100,12 @@ const appState = {
   dimensions: [],
   scoreItems: [],
   recentScoreItems: [],
+  scoreItemFilterDimensionId: 0,
   rankings: [],
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
   rollcall: { roundId: "", student: null, remaining: 0 },
+  groupsStudentKeyword: "",
   timer: {
     mode: "countdown",
     running: false,
@@ -321,6 +323,10 @@ async function scoreEntryCreate(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+async function scoreEntryDelete(id) {
+  await apiFetch(`/score-entries/${id}`, { method: "DELETE" });
 }
 
 async function rollcallStart(fair) {
@@ -747,6 +753,14 @@ function viewScore() {
   const targetSel = el("select");
   const remark = el("input", { type: "text", placeholder: "备注（可选）" });
 
+
+  const filterDim = el("select");
+  filterDim.appendChild(el("option", { value: "0", text: "全部维度" }));
+  for (const d of appState.dimensions || []) {
+    filterDim.appendChild(el("option", { value: String(d.id), text: d.name }));
+  }
+  filterDim.value = String(appState.scoreItemFilterDimensionId || 0);
+
   function refreshTargets() {
     targetSel.innerHTML = "";
     if (scopeSel.value === "student") {
@@ -773,6 +787,22 @@ function viewScore() {
   scopeSel.value = appState.scoreDraft?.scope || "student";
   refreshTargets();
 
+  const currentScore = el("div", { class: "pill" }, [el("span", { text: "当前积分 -" })]);
+  function syncCurrentScore() {
+    if (scopeSel.value !== "student") {
+      currentScore.style.display = "none";
+      return;
+    }
+    currentScore.style.display = "";
+    const sid = Number(targetSel.value || 0);
+    const st = (appState.students.items || []).find((x) => Number(x.id) === sid) || null;
+    const sc = st ? Number(st.totalScore || 0) : 0;
+    currentScore.textContent = `当前积分 ${sc}`;
+  }
+  targetSel.addEventListener("change", syncCurrentScore);
+  scopeSel.addEventListener("change", syncCurrentScore);
+  syncCurrentScore();
+
   function itemBtn(it) {
     const score = Number(it.score || 0);
     const cls = score >= 0 ? "btn btn-green" : "btn btn-red";
@@ -791,6 +821,8 @@ function viewScore() {
           await scoreEntryCreate(payload);
           toast("已录入");
           await loadRecentScoreItems();
+
+          await Promise.all([loadStudentsForPickers(), loadGroups()]);
           if (
             appState.scoreDraft?.scope === payload.scope &&
             (appState.scoreDraft?.targetId || 0) === (payload.targetId || 0)
@@ -805,8 +837,28 @@ function viewScore() {
     });
   }
 
-  const recent = el("div", { class: "row" }, (appState.recentScoreItems || []).map(itemBtn));
-  const all = el("div", { class: "row" }, (appState.scoreItems || []).map(itemBtn));
+
+  const recent = el("div", { class: "row" });
+  const all = el("div", { class: "row" });
+
+  function renderItems() {
+    const dimId = Number(filterDim.value || 0);
+    const recentItems = (appState.recentScoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
+    const allItems = (appState.scoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
+
+    recent.innerHTML = "";
+    all.innerHTML = "";
+
+    for (const it of recentItems) recent.appendChild(itemBtn(it));
+    for (const it of allItems) all.appendChild(itemBtn(it));
+  }
+
+  filterDim.addEventListener("change", () => {
+    appState.scoreItemFilterDimensionId = Number(filterDim.value || 0);
+    renderItems();
+  });
+
+  renderItems();
 
   const draftInfo = appState.scoreDraft?.targetId
     ? el("div", { class: "tag" }, [
@@ -830,7 +882,9 @@ function viewScore() {
         el("div", { class: "field" }, [el("label", { text: "范围" }), scopeSel]),
         el("div", { class: "field" }, [el("label", { text: "对象" }), targetSel]),
         el("div", { class: "field" }, [el("label", { text: "备注" }), remark]),
+        el("div", { class: "field" }, [el("label", { text: "维度筛选" }), filterDim]),
         draftInfo,
+        currentScore,
       ]),
     ]),
     el("div", { class: "card" }, [
@@ -1006,10 +1060,25 @@ function viewGroups() {
     })
   );
 
+  const kw = el("input", { type: "text", placeholder: "搜索：姓名/学号", value: appState.groupsStudentKeyword || "" });
+  kw.addEventListener("input", () => {
+    appState.groupsStudentKeyword = (kw.value || "").trim();
+    render();
+  });
+
+  const keyword = (appState.groupsStudentKeyword || "").trim();
+  const keywordLower = keyword.toLowerCase();
+  const filteredStudents = (appState.students.items || []).filter((s) => {
+    if (!keywordLower) return true;
+    const name = String(s.name || "");
+    const no = String(s.studentNo || "");
+    return name.toLowerCase().includes(keywordLower) || no.toLowerCase().includes(keywordLower);
+  });
+
   const studentList = el(
     "div",
     { class: "list" },
-    (appState.students.items || []).map((s, idx) => {
+    filteredStudents.map((s, idx) => {
       const groupSel = el("select");
       groupSel.appendChild(el("option", { value: "0", text: "未分组" }));
       for (const g of appState.groups || []) {
@@ -1035,6 +1104,7 @@ function viewGroups() {
       });
 
       const n = pad2(idx + 1);
+
       const combo = `${n} ${s.name}`;
       return el("div", { class: "student-item" }, [
         el("div", { class: "student-name" }, [
@@ -1057,6 +1127,7 @@ function viewGroups() {
     ]),
     el("div", { class: "card" }, [
       el("h2", { text: "学生分组" }),
+      el("div", { class: "row" }, [kw]),
       studentList,
     ]),
   ]);
@@ -1346,12 +1417,25 @@ function viewEntries() {
     },
   });
 
+
   const pager = el("div", { class: "row" }, [
     el("span", { class: "pill" }, [el("span", { text: `第 ${appState.scoreEntriesQuery.page || 1} 页` })]),
     el("span", { class: "pill" }, [el("span", { text: `共 ${appState.scoreEntries.total || 0} 条` })]),
     prev,
     next,
+
   ]);
+
+
+  const selectedStudentId = Number(stuSel.value || 0);
+  const selectedStudent = selectedStudentId
+    ? (appState.students.items || []).find((x) => Number(x.id) === selectedStudentId) || null
+    : null;
+  const selectedTotal = selectedStudent ? Number(selectedStudent.totalScore || 0) : 0;
+  const currentTotalPill = selectedStudent
+    ? el("span", { class: "pill" }, [el("span", { text: `当前总分 ${selectedTotal}` })])
+    : null;
+
 
   const entries = el(
     "div",
@@ -1367,6 +1451,27 @@ function viewEntries() {
       const groupName = groupNameById(e.groupId);
       const remark = (e.remark || "").trim();
 
+
+      const canRevoke = Number(appState.scoreEntriesQuery.studentId || 0) > 0;
+      const revokeBtn = canRevoke
+        ? el("button", {
+            class: "btn btn-small btn-danger",
+            text: "撤销",
+            onclick: async () => {
+              try {
+                const ok = window.confirm("确认撤销这条积分记录？");
+                if (!ok) return;
+                await scoreEntryDelete(e.id);
+                toast("已撤销");
+                await Promise.all([loadStudentsForPickers(), loadGroups(), loadScoreEntries(appState.scoreEntriesQuery)]);
+                render();
+              } catch (err) {
+                toast(String(err.message || err));
+              }
+            },
+          })
+        : null;
+
       return el("div", { class: "entry-item" }, [
         el("div", { class: "kv" }, [
           el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, [
@@ -1376,11 +1481,13 @@ function viewEntries() {
             el("span", { class: "pill" }, [el("span", { text: itemName })]),
           ]),
           el("div", { class: scoreCls, text: `${score >= 0 ? "+" : ""}${score}` }),
+
         ]),
         el("div", { class: "row", style: "justify-content:space-between" }, [
           el("span", { class: "muted", text: when }),
           remark ? el("span", { class: "muted", text: `备注：${remark}` }) : el("span"),
         ]),
+        revokeBtn ? el("div", { class: "row", style: "justify-content:flex-end" }, [revokeBtn]) : null,
       ]);
     })
   );
@@ -1389,6 +1496,7 @@ function viewEntries() {
     el("div", { class: "card" }, [
       el("h2", { text: "筛选" }),
       el("div", { class: "row" }, [
+        currentTotalPill,
         el("div", { class: "field" }, [el("label", { text: "学生" }), stuSel]),
         el("div", { class: "field" }, [el("label", { text: "小组" }), groupSel]),
         el("div", { class: "field" }, [el("label", { text: "最近天数" }), sinceDays]),
