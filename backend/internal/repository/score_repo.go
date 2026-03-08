@@ -54,6 +54,14 @@ func (r *DimensionRepo) Delete(ctx context.Context, id int64) error {
 		if cnt > 0 {
 			return ErrDimensionHasScoreItems
 		}
+
+		if err := tx.Exec(
+			"UPDATE score_entries e JOIN score_items si ON e.score_item_id = si.id SET e.dimension_id = si.dimension_id WHERE e.dimension_id = ?",
+			id,
+		).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Model(&model.ScoreEntry{}).Where("dimension_id = ?", id).Count(&cnt).Error; err != nil {
 			return err
 		}
@@ -93,10 +101,33 @@ func (r *ScoreItemRepo) Get(ctx context.Context, id int64) (*model.ScoreItem, er
 }
 
 func (r *ScoreItemRepo) Update(ctx context.Context, id int64, updates map[string]any) (*model.ScoreItem, error) {
-	if err := r.db.WithContext(ctx).Model(&model.ScoreItem{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	var out *model.ScoreItem
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var before model.ScoreItem
+		if err := tx.First(&before, id).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.ScoreItem{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+		after, err := (&ScoreItemRepo{db: tx}).Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if before.DimensionID != after.DimensionID {
+			if err := tx.Model(&model.ScoreEntry{}).
+				Where("score_item_id = ?", after.ID).
+				Update("dimension_id", after.DimensionID).Error; err != nil {
+				return err
+			}
+		}
+		out = after
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return r.Get(ctx, id)
+	return out, nil
 }
 
 func (r *ScoreItemRepo) Delete(ctx context.Context, id int64) error {

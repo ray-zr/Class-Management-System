@@ -39,6 +39,11 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1/api/students
   - B 列：`Name` 或 `姓名`
 - 列定义：A 学号、B 姓名、C 性别、D 联系方式、E 班委职位
 
+模板下载：
+
+- 通过网页端：在“学生名单”页面点击“下载导入模板”
+- 或直接下载：`/templates/students_import_template.xlsx`
+
 示例：
 
 ```bash

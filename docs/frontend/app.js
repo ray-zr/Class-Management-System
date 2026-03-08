@@ -504,6 +504,13 @@ function viewStudents() {
       }
     },
   });
+  
+  const tpl = el("a", {
+    class: "btn",
+    href: "/templates/students_import_template.xlsx",
+    text: "下载导入模板",
+    download: "students_import_template.xlsx",
+  });
 
   const file = el("input", { type: "file", accept: ".xlsx" });
   const upload = el("button", {
@@ -663,8 +670,8 @@ function viewStudents() {
     : null;
 
   const list = el("div", { class: "list" }, (appState.students.items || []).map((s, idx) => {
-    const n = pad2(idx + 1);
-    const combo = `${n} ${s.name}`;
+    const gender = (s.gender || "").trim() || "-";
+    const group = groupNameById(s.groupId);
     const edit = el("button", {
       class: "btn btn-small",
       text: "编辑",
@@ -684,14 +691,14 @@ function viewStudents() {
 
     return el("div", { class: "student-item" }, [
       el("div", { class: "student-name" }, [
-        el("div", { class: "combo", text: combo }),
-        el("div", {
-          class: "meta",
-          text: `${s.studentNo}${s.position ? ` · ${s.position}` : ""}${s.gender ? ` · ${s.gender}` : ""}${s.phone ? ` · ${s.phone}` : ""} · ${groupNameById(s.groupId)}`,
-        }),
+        el("div", { class: "combo" }, [
+          el("strong", { text: String(s.studentNo || "") }),
+          " ",
+          el("strong", { text: String(s.name || "") }),
+        ]),
+        el("div", { class: "meta", text: `${gender} · ${group}` }),
       ]),
       el("div", { class: "row" }, [
-        el("div", { class: (Number(s.totalScore ?? 0) >= 0 ? "score pos" : "score neg"), text: String(s.totalScore ?? 0) }),
         edit,
       ]),
     ]);
@@ -704,6 +711,7 @@ function viewStudents() {
         el("span", { class: "pill" }, [el("span", { text: `共 ${appState.students.total || 0} 人` })]),
         el("span", { class: "pill" }, [el("span", { text: `第 ${appState.studentsQuery.page || 1} 页` })]),
         reload,
+        tpl,
         file,
         upload,
       ]),
