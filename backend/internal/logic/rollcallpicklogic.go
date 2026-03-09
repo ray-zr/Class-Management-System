@@ -28,11 +28,23 @@ func NewRollcallPickLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Roll
 	}
 }
 
-func (l *RollcallPickLogic) RollcallPick() (resp *types.RollcallPickResp, err error) {
+func (l *RollcallPickLogic) RollcallPick(req *types.RollcallPickReq) (resp *types.RollcallPickResp, err error) {
 	roundID, fair, ok := l.svcCtx.RollcallState.Get()
 	if !ok {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall not started"}
 	}
+
+	count := int64(1)
+	if req != nil && req.Count > 0 {
+		count = req.Count
+	}
+	if count < 1 {
+		count = 1
+	}
+	if count > 50 {
+		count = 50
+	}
+
 	active, err := l.svcCtx.RollcallRepo.RoundActive(l.ctx, roundID)
 	if err != nil {
 		return nil, err
@@ -40,23 +52,29 @@ func (l *RollcallPickLogic) RollcallPick() (resp *types.RollcallPickResp, err er
 	if !active {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall ended"}
 	}
-	studentID, remaining, err := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID, fair)
-	if err != nil {
-		if fair {
+
+	items := make([]types.StudentResp, 0, int(count))
+	remaining := int64(0)
+	for i := int64(0); i < count; i++ {
+		studentID, rem, pickErr := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID, fair)
+		if pickErr != nil {
+			if fair {
+				_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
+			}
+			if len(items) == 0 {
+				return nil, pickErr
+			}
+			break
+		}
+		remaining = rem
+		if fair && remaining == 0 {
 			_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
 		}
-		return nil, err
-	}
-	if fair && remaining == 0 {
-		_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
-	}
-	s, err := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
-	if err != nil {
-		return nil, err
-	}
-	return &types.RollcallPickResp{
-		RoundId: roundID,
-		Student: types.StudentResp{
+		s, getErr := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		items = append(items, types.StudentResp{
 			Id:         s.ID,
 			StudentNo:  s.StudentNo,
 			Name:       s.Name,
@@ -67,7 +85,15 @@ func (l *RollcallPickLogic) RollcallPick() (resp *types.RollcallPickResp, err er
 			TotalScore: s.TotalScore,
 			CreatedAt:  s.CreatedAt.Unix(),
 			UpdatedAt:  s.UpdatedAt.Unix(),
-		},
-		Remaining: remaining,
-	}, nil
+		})
+		if fair && remaining == 0 {
+			break
+		}
+	}
+
+	var first *types.StudentResp
+	if len(items) > 0 {
+		first = &items[0]
+	}
+	return &types.RollcallPickResp{RoundId: roundID, Student: first, Students: items, Remaining: remaining}, nil
 }

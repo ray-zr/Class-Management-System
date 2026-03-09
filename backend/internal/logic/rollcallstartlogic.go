@@ -33,23 +33,42 @@ func (l *RollcallStartLogic) RollcallStart(req *types.RollcallStartReq) (resp *t
 	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
+	count := int64(1)
+	if req.Count > 0 {
+		count = req.Count
+	}
+	if count < 1 {
+		count = 1
+	}
+	if count > 50 {
+		count = 50
+	}
 	roundID := uuid.NewString()
 	fair := req.Fair
 	if err := l.svcCtx.RollcallRepo.StartRound(l.ctx, roundID, fair); err != nil {
 		return nil, err
 	}
 	l.svcCtx.RollcallState.Start(roundID, fair)
-	studentID, remaining, err := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID, fair)
-	if err != nil {
-		return nil, err
-	}
-	s, err := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
-	if err != nil {
-		return nil, err
-	}
-	return &types.RollcallPickResp{
-		RoundId: roundID,
-		Student: types.StudentResp{
+
+	items := make([]types.StudentResp, 0, int(count))
+	remaining := int64(0)
+	for i := int64(0); i < count; i++ {
+		studentID, rem, pickErr := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID, fair)
+		if pickErr != nil {
+			if len(items) == 0 {
+				return nil, pickErr
+			}
+			break
+		}
+		remaining = rem
+		if fair && remaining == 0 {
+			_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
+		}
+		s, getErr := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		items = append(items, types.StudentResp{
 			Id:         s.ID,
 			StudentNo:  s.StudentNo,
 			Name:       s.Name,
@@ -60,7 +79,15 @@ func (l *RollcallStartLogic) RollcallStart(req *types.RollcallStartReq) (resp *t
 			TotalScore: s.TotalScore,
 			CreatedAt:  s.CreatedAt.Unix(),
 			UpdatedAt:  s.UpdatedAt.Unix(),
-		},
-		Remaining: remaining,
-	}, nil
+		})
+		if fair && remaining == 0 {
+			break
+		}
+	}
+
+	var first *types.StudentResp
+	if len(items) > 0 {
+		first = &items[0]
+	}
+	return &types.RollcallPickResp{RoundId: roundID, Student: first, Students: items, Remaining: remaining}, nil
 }

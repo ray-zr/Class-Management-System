@@ -89,10 +89,15 @@ type RecentScoreItemsResp struct {
 	Items []ScoreItemResp `json:"items"`
 }
 
+type RollcallPickReq struct {
+	Count int64 `form:"count,optional" json:"count,optional"` // how many students to pick this time, default 1
+}
+
 type RollcallPickResp struct {
-	RoundId   string      `json:"roundId"`
-	Student   StudentResp `json:"student"`
-	Remaining int64       `json:"remaining"`
+	RoundId   string        `json:"roundId"`
+	Student   *StudentResp  `json:"student,omitempty"`
+	Students  []StudentResp `json:"students"`
+	Remaining int64         `json:"remaining"`
 }
 
 type RollcallResetReq struct {
@@ -100,7 +105,8 @@ type RollcallResetReq struct {
 }
 
 type RollcallStartReq struct {
-	Fair bool `json:"fair"`
+	Fair  bool  `json:"fair"`
+	Count int64 `json:"count,optional"` // how many students to pick this time, default 1
 }
 
 type ScoreEntryCreateReq struct {

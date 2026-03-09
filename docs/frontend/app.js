@@ -107,8 +107,11 @@ const appState = {
   groupRankings: [],
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
-  rollcall: { roundId: "", student: null, remaining: 0 },
+  rollcallPickCount: 1,
+  rollcall: { roundId: "", students: [], remaining: 0 },
   groupsStudentKeyword: "",
+  timerPresetMin: 5,
+  timerPresetSec: 0,
   timer: {
     mode: "countdown",
     running: false,
@@ -346,12 +349,13 @@ async function rollcallStart(fair) {
   appState.rollcall = await apiFetch("/rollcall/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fair: !!fair }),
+    body: JSON.stringify({ fair: !!fair, count: Number(appState.rollcallPickCount || 1) }),
   });
 }
 
 async function rollcallPick() {
-  appState.rollcall = await apiFetch("/rollcall/pick", { method: "POST" });
+  const c = Math.max(1, Math.min(50, Math.floor(Number(appState.rollcallPickCount || 1))));
+  appState.rollcall = await apiFetch(`/rollcall/pick?count=${c}`, { method: "POST" });
 }
 
 async function rollcallReset(roundId) {
@@ -360,7 +364,7 @@ async function rollcallReset(roundId) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roundId: roundId || "" }),
   });
-  appState.rollcall = { roundId: "", student: null, remaining: 0 };
+  appState.rollcall = { roundId: "", students: [], remaining: 0 };
 }
 
 function viewLogin() {
@@ -977,6 +981,13 @@ function viewScore() {
 
 function viewRollcall() {
   const fair = el("input", { type: "checkbox" });
+  const pickCount = el("input", { type: "number", min: "1", max: "50", step: "1", placeholder: "1" });
+  pickCount.value = String(appState.rollcallPickCount || 1);
+  pickCount.addEventListener("change", () => {
+    const v = Math.max(1, Math.min(50, Math.floor(Number(pickCount.value || 1))));
+    appState.rollcallPickCount = v;
+    pickCount.value = String(v);
+  });
   const start = el("button", {
     class: "btn btn-amber",
     text: "开始（并点名一次）",
@@ -1015,32 +1026,33 @@ function viewRollcall() {
     },
   });
 
-  const st = appState.rollcall.student;
-  const jump = el("button", {
-    class: "btn btn-amber",
-    text: "给TA录入积分",
-    onclick: async () => {
-      if (!st) return;
-      appState.scoreDraft = { scope: "student", targetId: st.id };
-      appState.route = "score";
-      try {
-        await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
-      } catch (e) {
-        toast(String(e.message || e));
-      }
-      render();
-    },
-  });
-  const chosen = st
-    ? el("div", { class: "student-item" }, [
-        el("div", { class: "student-name" }, [
-          el("div", { class: "combo", text: `${st.studentNo} ${st.name}` }),
-          el("div", { class: "meta", text: st.position || "" }),
-        ]),
-        el("div", { class: "row" }, [
-          el("div", { class: "pill" }, [el("span", { text: `剩余 ${appState.rollcall.remaining}` })]),
-          jump,
-        ]),
+  const sts = appState.rollcall.students || [];
+  const chosen = sts.length
+    ? el("div", { class: "grid" }, [
+        el("div", { class: "pill" }, [el("span", { text: `本次点到 ${sts.length} 人 · 剩余 ${appState.rollcall.remaining}` })]),
+        ...sts.map((st) => {
+          const jump = el("button", {
+            class: "btn btn-small btn-amber",
+            text: "给TA录入积分",
+            onclick: async () => {
+              appState.scoreDraft = { scope: "student", targetId: st.id };
+              appState.route = "score";
+              try {
+                await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
+              } catch (e) {
+                toast(String(e.message || e));
+              }
+              render();
+            },
+          });
+          return el("div", { class: "student-item" }, [
+            el("div", { class: "student-name" }, [
+              el("div", { class: "combo", text: `${st.studentNo} ${st.name}` }),
+              el("div", { class: "meta", text: st.position || "" }),
+            ]),
+            el("div", { class: "row" }, [jump]),
+          ]);
+        }),
       ])
     : el("div", { class: "pill" }, [el("span", { text: "尚未点名" })]);
 
@@ -1049,6 +1061,7 @@ function viewRollcall() {
       el("h2", { text: "设置" }),
       el("div", { class: "row" }, [
         el("span", { class: "pill" }, [fair, el("span", { text: "公平模式" })]),
+        el("div", { class: "field" }, [el("label", { text: "点名人数" }), pickCount]),
         start,
         pick,
         reset,
@@ -1762,11 +1775,57 @@ function viewTimer() {
     render();
   });
 
+  const customMin = el("input", {
+    type: "number",
+    min: "0",
+    max: "240",
+    step: "1",
+    placeholder: "分钟",
+    value: String(appState.timerPresetMin || 5),
+  });
+  const customSec = el("input", {
+    type: "number",
+    min: "0",
+    max: "59",
+    step: "1",
+    placeholder: "秒",
+    value: String(appState.timerPresetSec || 0),
+  });
+  const applyCustom = el("button", {
+    class: "btn",
+    text: "应用",
+    onclick: () => {
+      const rawM = Number(customMin.value || 0);
+      const rawS = Number(customSec.value || 0);
+      if (!Number.isFinite(rawM) || !Number.isFinite(rawS)) {
+        toast("请输入有效时间");
+        return;
+      }
+      const m = Math.max(0, Math.min(240, Math.floor(rawM)));
+      const s = Math.max(0, Math.min(59, Math.floor(rawS)));
+      if (m === 0 && s === 0) {
+        toast("时间不能为 0");
+        return;
+      }
+      appState.timerPresetMin = m;
+      appState.timerPresetSec = s;
+      appState.timer.mode = "countdown";
+      mode.value = "countdown";
+      appState.timer.targetMs = (m * 60 + s) * 1000;
+      appState.timer.leftMs = appState.timer.targetMs;
+      appState.timer.running = false;
+      stopTimerLoop();
+      render();
+    },
+  });
+
   const presets = [1, 5, 10, 20].map((m) =>
     el("button", {
       class: "btn",
       text: `${m} 分钟`,
       onclick: () => {
+        appState.timerPresetMin = m;
+        appState.timerPresetSec = 0;
         appState.timer.mode = "countdown";
         mode.value = "countdown";
         appState.timer.targetMs = m * 60 * 1000;
@@ -1824,6 +1883,8 @@ function viewTimer() {
       el("h2", { text: "模式与预设" }),
       el("div", { class: "row" }, [
         el("div", { class: "field" }, [el("label", { text: "模式" }), mode]),
+        el("div", { class: "field" }, [el("label", { text: "自定义（分:秒）" }), el("div", { class: "row" }, [customMin, customSec])]),
+        applyCustom,
         ...presets,
       ]),
     ]),

@@ -8,13 +8,16 @@ import (
 
 	"class-management-system/backend/internal/logic"
 	"class-management-system/backend/internal/svc"
+	"class-management-system/backend/internal/types"
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
 func RollcallPickHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var req types.RollcallPickReq
+		_ = httpx.Parse(r, &req)
 		l := logic.NewRollcallPickLogic(r.Context(), svcCtx)
-		resp, err := l.RollcallPick()
+		resp, err := l.RollcallPick(&req)
 		if err != nil {
 			httpx.ErrorCtx(r.Context(), w, err)
 		} else {
