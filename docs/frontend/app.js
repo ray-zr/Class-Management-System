@@ -107,6 +107,7 @@ const appState = {
   groupRankings: [],
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
+  scoreEntriesStudentKeyword: "",
   rollcallPickCount: 1,
   rollcall: { roundId: "", students: [], remaining: 0 },
   groupsStudentKeyword: "",
@@ -1431,12 +1432,60 @@ function viewConfig() {
 function viewEntries() {
   const q = { ...appState.scoreEntriesQuery };
 
-  const stuSel = el("select");
-  stuSel.appendChild(el("option", { value: "0", text: "全部学生" }));
-  for (const s of appState.students.items || []) {
-    stuSel.appendChild(el("option", { value: String(s.id), text: `${s.studentNo} ${s.name}` }));
+  function tokenizeKw(v) {
+    const s = String(v || "").trim().toLowerCase();
+    if (!s) return [];
+    return s.split(/\s+/).filter(Boolean);
   }
-  stuSel.value = String(q.studentId || 0);
+
+  function matchAllTokens(haystack, tokens) {
+    if (!tokens.length) return true;
+    const h = String(haystack || "").toLowerCase();
+    return tokens.every((t) => h.includes(t));
+  }
+
+  const stuSel = el("select");
+  const stuKw = el("input", { type: "text", placeholder: "搜索（学号/姓名）" });
+  stuKw.value = String(appState.scoreEntriesStudentKeyword || "");
+  stuSel.appendChild(el("option", { value: "0", text: "全部学生" }));
+
+  function refreshStudents() {
+    stuSel.disabled = false;
+    const prev = String(stuSel.value || "");
+    stuSel.innerHTML = "";
+    stuSel.appendChild(el("option", { value: "0", text: "全部学生" }));
+
+    const kwTokens = tokenizeKw(stuKw.value);
+    for (const s of appState.students.items || []) {
+      const txt = `${s.studentNo || ""} ${s.name || ""}`.trim();
+      if (!matchAllTokens(txt, kwTokens)) continue;
+      stuSel.appendChild(el("option", { value: String(s.id), text: txt }));
+    }
+
+    if (stuSel.options.length <= 1) {
+      stuSel.appendChild(el("option", { value: "", text: "无匹配学生" }));
+      stuSel.value = "";
+      stuSel.disabled = true;
+      return;
+    }
+
+    const desired = String(q.studentId || 0);
+    if (desired && [...stuSel.options].some((o) => o.value === desired)) {
+      stuSel.value = desired;
+      return;
+    }
+    if (prev && [...stuSel.options].some((o) => o.value === prev)) {
+      stuSel.value = prev;
+      return;
+    }
+    stuSel.value = "0";
+  }
+
+  refreshStudents();
+  stuKw.addEventListener("input", () => {
+    appState.scoreEntriesStudentKeyword = stuKw.value || "";
+    refreshStudents();
+  });
 
   const groupSel = el("select");
   groupSel.appendChild(el("option", { value: "0", text: "全部小组" }));
@@ -1456,6 +1505,9 @@ function viewEntries() {
     text: "查询",
     onclick: async () => {
       try {
+        if (stuSel.disabled) {
+          throw new Error("请选择学生");
+        }
         appState.scoreEntriesQuery = {
           page: 1,
           size: Math.max(1, Math.min(200, Number(size.value || 20))),
@@ -1585,6 +1637,7 @@ function viewEntries() {
       el("div", { class: "row" }, [
         currentTotalPill,
         el("div", { class: "field" }, [el("label", { text: "学生" }), stuSel]),
+        el("div", { class: "field" }, [el("label", { text: "学生搜索" }), stuKw]),
         el("div", { class: "field" }, [el("label", { text: "小组" }), groupSel]),
         el("div", { class: "field" }, [el("label", { text: "最近天数" }), sinceDays]),
         el("div", { class: "field" }, [el("label", { text: "每页条数" }), size]),
