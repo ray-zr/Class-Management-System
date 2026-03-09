@@ -101,7 +101,10 @@ const appState = {
   scoreItems: [],
   recentScoreItems: [],
   scoreItemFilterDimensionId: 0,
+  scoreTargetKeyword: "",
+  rankingsType: "students",
   rankings: [],
+  groupRankings: [],
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
   rollcall: { roundId: "", student: null, remaining: 0 },
@@ -236,6 +239,16 @@ async function loadRankings(params = {}) {
   }
   const res = await apiFetch(`/rankings/students${q.toString() ? `?${q}` : ""}`);
   appState.rankings = res.items || [];
+}
+
+async function loadGroupRankings(params = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "" || Number.isNaN(v)) continue;
+    q.set(k, String(v));
+  }
+  const res = await apiFetch(`/rankings/groups${q.toString() ? `?${q}` : ""}`);
+  appState.groupRankings = res.items || [];
 }
 
 async function loadScoreEntries(params = {}) {
@@ -675,7 +688,7 @@ function viewStudents() {
       })
     : null;
 
-  const list = el("div", { class: "list" }, (appState.students.items || []).map((s, idx) => {
+  const list = el("div", { class: "list" }, (appState.students.items || []).map((s) => {
     const gender = (s.gender || "").trim() || "-";
     const group = groupNameById(s.groupId);
     const edit = el("button", {
@@ -751,6 +764,8 @@ function viewScore() {
     el("option", { value: "class", text: "全班" }),
   ]);
   const targetSel = el("select");
+  const targetKw = el("input", { type: "text", placeholder: "搜索（学号/姓名）" });
+  targetKw.value = String(appState.scoreTargetKeyword || "");
   const remark = el("input", { type: "text", placeholder: "备注（可选）" });
 
 
@@ -761,18 +776,47 @@ function viewScore() {
   }
   filterDim.value = String(appState.scoreItemFilterDimensionId || 0);
 
+  function tokenizeKw(v) {
+    const s = String(v || "").trim().toLowerCase();
+    if (!s) return [];
+    return s.split(/\s+/).filter(Boolean);
+  }
+
+  function matchAllTokens(haystack, tokens) {
+    if (!tokens.length) return true;
+    const h = String(haystack || "").toLowerCase();
+    return tokens.every((t) => h.includes(t));
+  }
+
   function refreshTargets() {
+    targetSel.disabled = false;
+    const prev = String(targetSel.value || "");
     targetSel.innerHTML = "";
+
+    targetKw.style.display = scopeSel.value === "class" ? "none" : "";
+    targetKw.placeholder = scopeSel.value === "group" ? "搜索（小组名）" : "搜索（学号/姓名）";
+
+    const kwTokens = tokenizeKw(targetKw.value);
     if (scopeSel.value === "student") {
       for (const s of appState.students.items || []) {
-        targetSel.appendChild(el("option", { value: String(s.id), text: `${s.studentNo} ${s.name}` }));
+        const txt = `${s.studentNo || ""} ${s.name || ""}`.trim();
+        if (!matchAllTokens(txt, kwTokens)) continue;
+        targetSel.appendChild(el("option", { value: String(s.id), text: txt }));
       }
     } else if (scopeSel.value === "group") {
       for (const g of appState.groups || []) {
+        if (!matchAllTokens(g.name || "", kwTokens)) continue;
         targetSel.appendChild(el("option", { value: String(g.id), text: g.name }));
       }
     } else {
       targetSel.appendChild(el("option", { value: "0", text: "全班" }));
+    }
+
+    if (scopeSel.value !== "class" && !targetSel.options.length) {
+      targetSel.appendChild(el("option", { value: "", text: "无匹配对象" }));
+      targetSel.value = "";
+      targetSel.disabled = true;
+      return;
     }
 
     if (appState.scoreDraft && appState.scoreDraft.scope === scopeSel.value) {
@@ -780,6 +824,8 @@ function viewScore() {
       if ([...targetSel.options].some((o) => o.value === v)) {
         targetSel.value = v;
       }
+    } else if (prev && [...targetSel.options].some((o) => o.value === prev)) {
+      targetSel.value = prev;
     }
   }
 
@@ -794,6 +840,10 @@ function viewScore() {
       return;
     }
     currentScore.style.display = "";
+    if (targetSel.disabled || !String(targetSel.value || "")) {
+      currentScore.textContent = "当前积分 -";
+      return;
+    }
     const sid = Number(targetSel.value || 0);
     const st = (appState.students.items || []).find((x) => Number(x.id) === sid) || null;
     const sc = st ? Number(st.totalScore || 0) : 0;
@@ -801,6 +851,11 @@ function viewScore() {
   }
   targetSel.addEventListener("change", syncCurrentScore);
   scopeSel.addEventListener("change", syncCurrentScore);
+  targetKw.addEventListener("input", () => {
+    appState.scoreTargetKeyword = targetKw.value || "";
+    refreshTargets();
+    syncCurrentScore();
+  });
   syncCurrentScore();
 
   function itemBtn(it) {
@@ -812,6 +867,9 @@ function viewScore() {
       text: txt,
       onclick: async () => {
         try {
+          if (scopeSel.value !== "class" && targetSel.disabled) {
+            throw new Error("请选择对象");
+          }
           const payload = {
             scope: scopeSel.value,
             targetId: scopeSel.value === "class" ? 0 : Number(targetSel.value || 0),
@@ -838,19 +896,29 @@ function viewScore() {
   }
 
 
-  const recent = el("div", { class: "row" });
-  const all = el("div", { class: "row" });
+  const recentPlus = el("div", { class: "row" });
+  const recentMinus = el("div", { class: "row" });
+  const allPlus = el("div", { class: "row" });
+  const allMinus = el("div", { class: "row" });
 
   function renderItems() {
     const dimId = Number(filterDim.value || 0);
     const recentItems = (appState.recentScoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
     const allItems = (appState.scoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
 
-    recent.innerHTML = "";
-    all.innerHTML = "";
+    recentPlus.innerHTML = "";
+    recentMinus.innerHTML = "";
+    allPlus.innerHTML = "";
+    allMinus.innerHTML = "";
 
-    for (const it of recentItems) recent.appendChild(itemBtn(it));
-    for (const it of allItems) all.appendChild(itemBtn(it));
+    for (const it of recentItems) {
+      const score = Number(it.score || 0);
+      (score >= 0 ? recentPlus : recentMinus).appendChild(itemBtn(it));
+    }
+    for (const it of allItems) {
+      const score = Number(it.score || 0);
+      (score >= 0 ? allPlus : allMinus).appendChild(itemBtn(it));
+    }
   }
 
   filterDim.addEventListener("change", () => {
@@ -881,6 +949,7 @@ function viewScore() {
       el("div", { class: "row" }, [
         el("div", { class: "field" }, [el("label", { text: "范围" }), scopeSel]),
         el("div", { class: "field" }, [el("label", { text: "对象" }), targetSel]),
+        el("div", { class: "field" }, [el("label", { text: "对象搜索" }), targetKw]),
         el("div", { class: "field" }, [el("label", { text: "备注" }), remark]),
         el("div", { class: "field" }, [el("label", { text: "维度筛选" }), filterDim]),
         draftInfo,
@@ -889,11 +958,17 @@ function viewScore() {
     ]),
     el("div", { class: "card" }, [
       el("h2", { text: "最近使用" }),
-      recent,
+      el("div", { class: "grid", style: "gap:10px" }, [
+        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "加分项" })]), recentPlus]),
+        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "扣分项" })]), recentMinus]),
+      ]),
     ]),
     el("div", { class: "card", style: "grid-column:1/-1" }, [
       el("h2", { text: "全部积分项" }),
-      all,
+      el("div", { class: "grid", style: "gap:10px" }, [
+        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "加分项" })]), allPlus]),
+        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "扣分项" })]), allMinus]),
+      ]),
     ]),
   ]);
 
@@ -1046,7 +1121,6 @@ function viewGroups() {
         },
       });
 
-      const avg = el("div", { class: "pill" }, [el("span", { text: `平均分 ${Number(g.avgScore || 0)}` })]);
       const avgScore = Number(g.avgScore || 0);
       const avgScoreEl = el("div", { class: avgScore >= 0 ? "score pos" : "score neg", text: String(avgScore) });
       return el("div", { class: "row entry-item" }, [
@@ -1516,7 +1590,16 @@ function viewEntries() {
 }
 
 function viewRankings() {
+  const typeSel = el("select", {}, [
+    el("option", { value: "students", text: "学生排行" }),
+    el("option", { value: "groups", text: "小组排行（平均分）" }),
+  ]);
+  typeSel.value = appState.rankingsType || "students";
+
   const month = el("input", { type: "month" });
+  const week = el("select");
+  week.appendChild(el("option", { value: "", text: "整月" }));
+  for (let i = 1; i <= 6; i++) week.appendChild(el("option", { value: String(i), text: `第 ${i} 周` }));
   const total = el("input", { type: "checkbox" });
   const dim = el("select");
   dim.appendChild(el("option", { value: "", text: "全部维度" }));
@@ -1526,10 +1609,16 @@ function viewRankings() {
   const syncTotal = () => {
     const on = !!total.checked;
     month.disabled = on;
+    week.disabled = on;
     dim.disabled = on;
   };
   total.addEventListener("change", () => {
     syncTotal();
+  });
+  typeSel.addEventListener("change", () => {
+    appState.rankingsType = typeSel.value;
+    syncTotal();
+    render();
   });
   syncTotal();
   const topN = el("input", { type: "number", min: "0", placeholder: "前 N 名高亮（可选）" });
@@ -1538,12 +1627,16 @@ function viewRankings() {
     text: "查询",
     onclick: async () => {
       try {
-        await loadRankings({
+        const params = {
           total: total.checked,
           month: month.value,
+          week: week.value ? Number(week.value) : "",
           dimensionId: dim.value ? Number(dim.value) : "",
           topN: topN.value ? Number(topN.value) : "",
-        });
+        };
+        appState.rankingsType = typeSel.value;
+        if (typeSel.value === "groups") await loadGroupRankings(params);
+        else await loadRankings(params);
         render();
       } catch (e) {
         toast(String(e.message || e));
@@ -1556,15 +1649,20 @@ function viewRankings() {
     text: "导出 Excel",
     onclick: () => {
       try {
+        if (typeSel.value === "groups") {
+          toast("小组排行暂不支持导出");
+          return;
+        }
         downloadWithAuth(
           "/rankings/students/export",
           {
             total: total.checked,
             month: month.value,
+            week: week.value ? Number(week.value) : "",
             dimensionId: dim.value ? Number(dim.value) : "",
             topN: topN.value ? Number(topN.value) : "",
           },
-          total.checked ? "总分积分排名汇总表.xlsx" : "月度积分排名汇总表.xlsx"
+          total.checked ? "总分积分排名汇总表.xlsx" : week.value ? "周度积分排名汇总表.xlsx" : "月度积分排名汇总表.xlsx"
         );
       } catch (e) {
         toast(String(e.message || e));
@@ -1572,27 +1670,46 @@ function viewRankings() {
     }
   });
 
-  const list = el("div", { class: "list" }, (appState.rankings || []).map((it) => {
-    const s = it.student;
-    const score = Number(it.score || 0);
-    const scoreCls = score >= 0 ? "score pos" : "score neg";
-    const name = `${pad2(it.rank)} ${s.name}`;
-    const meta = `${s.studentNo}${s.position ? ` · ${s.position}` : ""}`;
-    return el("div", { class: "student-item", style: it.highlight ? "outline:3px solid rgba(242, 178, 75, 0.35);" : "" }, [
-      el("div", { class: "student-name" }, [
-        el("div", { class: "combo", text: name }),
-        el("div", { class: "meta", text: meta }),
-      ]),
-      el("div", { class: scoreCls, text: String(score) }),
-    ]);
-  }));
+  const list = el(
+    "div",
+    { class: "list" },
+    (typeSel.value === "groups" ? appState.groupRankings : appState.rankings || []).map((it) => {
+      if (typeSel.value === "groups") {
+        const g = it.group;
+        const score = Number(it.score || 0);
+        const scoreCls = score >= 0 ? "score pos" : "score neg";
+        const name = `${pad2(it.rank)} ${g.name}`;
+        return el("div", { class: "student-item", style: it.highlight ? "outline:3px solid rgba(242, 178, 75, 0.35);" : "" }, [
+          el("div", { class: "student-name" }, [
+            el("div", { class: "combo", text: name }),
+            el("div", { class: "meta", text: "平均分" }),
+          ]),
+          el("div", { class: scoreCls, text: String(score) }),
+        ]);
+      }
+      const s = it.student;
+      const score = Number(it.score || 0);
+      const scoreCls = score >= 0 ? "score pos" : "score neg";
+      const name = `${pad2(it.rank)} ${s.name}`;
+      const meta = `${s.studentNo}${s.position ? ` · ${s.position}` : ""}`;
+      return el("div", { class: "student-item", style: it.highlight ? "outline:3px solid rgba(242, 178, 75, 0.35);" : "" }, [
+        el("div", { class: "student-name" }, [
+          el("div", { class: "combo", text: name }),
+          el("div", { class: "meta", text: meta }),
+        ]),
+        el("div", { class: scoreCls, text: String(score) }),
+      ]);
+    })
+  );
 
   const content = el("div", { class: "grid" }, [
     el("div", { class: "card" }, [
       el("h2", { text: "筛选" }),
       el("div", { class: "row" }, [
+        el("div", { class: "field" }, [el("label", { text: "类型" }), typeSel]),
         el("div", { class: "field" }, [el("label", { text: "总分榜" }), total]),
         el("div", { class: "field" }, [el("label", { text: "月份" }), month]),
+        el("div", { class: "field" }, [el("label", { text: "周" }), week]),
         el("div", { class: "field" }, [el("label", { text: "维度" }), dim]),
         el("div", { class: "field" }, [el("label", { text: "高亮阈值" }), topN]),
         query,
@@ -1600,7 +1717,7 @@ function viewRankings() {
       ]),
     ]),
     el("div", { class: "card" }, [
-      el("h2", { text: "学生排行" }),
+      el("h2", { text: typeSel.value === "groups" ? "小组排行" : "学生排行" }),
       list,
     ]),
   ]);
@@ -1744,7 +1861,7 @@ async function ensureDataForRoute() {
     ]);
   }
   if (appState.route === "rankings") {
-    await Promise.all([loadDimensions(), loadRankings({})]);
+    await Promise.all([loadDimensions(), loadRankings({}), loadGroupRankings({ total: true })]);
   }
 }
 

@@ -150,6 +150,7 @@ type (
 	RankingReq {
 		Month       string `form:"month,optional" json:"month,optional"` // YYYY-MM, default current month
 		Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, month/dimensionId are ignored
+		Week        int64  `form:"week,optional" json:"week,optional"`
 		DimensionId int64  `form:"dimensionId,optional" json:"dimensionId,optional"`
 		TopN        int64  `form:"topN,optional" json:"topN,optional"`
 	}
@@ -161,6 +162,15 @@ type (
 	}
 	RankingResp {
 		Items []StudentRankResp `json:"items"`
+	}
+	GroupRankResp {
+		Rank      int64     `json:"rank"`
+		Highlight bool      `json:"highlight"`
+		Group     GroupResp `json:"group"`
+		Score     float64   `json:"score"`
+	}
+	GroupRankingResp {
+		Items []GroupRankResp `json:"items"`
 	}
 	// Rollcall
 	RollcallStartReq {
@@ -267,6 +277,9 @@ service cms-api {
 	@handler Ranking
 	get /rankings/students returns (RankingResp)
 
+	@handler GroupRanking
+	get /rankings/groups (RankingReq) returns (GroupRankingResp)
+
 	@handler RankingExport
 	get /rankings/students/export returns (Empty)
 
@@ -280,3 +293,4 @@ service cms-api {
 	@handler RollcallReset
 	post /rollcall/reset (RollcallResetReq) returns (Empty)
 }
+

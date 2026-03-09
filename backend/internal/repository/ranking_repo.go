@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -27,6 +28,18 @@ type StudentScoreRow struct {
 
 	StudentCreatedAt time.Time `gorm:"column:student_created_at"`
 	StudentUpdatedAt time.Time `gorm:"column:student_updated_at"`
+}
+
+type GroupScoreRow struct {
+	GroupID   int64   `gorm:"column:group_id"`
+	GroupName string  `gorm:"column:group_name"`
+	Score     float64 `gorm:"column:score"`
+}
+
+type GroupStudentScoreRow struct {
+	GroupID   int64 `gorm:"column:group_id"`
+	StudentID int64 `gorm:"column:student_id"`
+	Score     int64 `gorm:"column:score"`
 }
 
 func (r *RankingRepo) StudentTotals(ctx context.Context, monthStart time.Time, monthEnd time.Time, dimensionID int64) ([]StudentScoreRow, error) {
@@ -93,5 +106,68 @@ func (r *RankingRepo) StudentTotalScoreRanking(ctx context.Context) ([]StudentSc
 	if err := q.Scan(&res).Error; err != nil {
 		return nil, err
 	}
+	return res, nil
+}
+
+func (r *RankingRepo) GroupTotalAvgScoreRanking(ctx context.Context) ([]GroupScoreRow, error) {
+	selectSQL := fmt.Sprintf(
+		"%s, %s, %s",
+		"g.id as group_id",
+		"g.name as group_name",
+		"coalesce(avg(s.total_score), 0) as score",
+	)
+	q := r.db.WithContext(ctx).
+		Table("`groups` g").
+		Joins("LEFT JOIN students s ON s.group_id = g.id").
+		Select(selectSQL).
+		Group("g.id").
+		Order("score desc, g.id asc")
+	var res []GroupScoreRow
+	if err := q.Scan(&res).Error; err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (r *RankingRepo) GroupAvgFromStudentTotals(ctx context.Context, start time.Time, end time.Time, dimensionID int64) ([]GroupScoreRow, error) {
+	rows, err := r.StudentTotals(ctx, start, end, dimensionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return []GroupScoreRow{}, nil
+	}
+
+	groupCnt := make(map[int64]int64, 16)
+	groupSum := make(map[int64]int64, 16)
+	groupName := make(map[int64]string, 16)
+	for _, row := range rows {
+		gid := row.GroupID
+		if gid == 0 {
+			continue
+		}
+		groupCnt[gid]++
+		groupSum[gid] += row.Score
+		if _, ok := groupName[gid]; !ok {
+			groupName[gid] = row.GroupName
+		}
+	}
+
+	res := make([]GroupScoreRow, 0, len(groupCnt))
+	for gid, cnt := range groupCnt {
+		sum := groupSum[gid]
+		avg := float64(0)
+		if cnt > 0 {
+			avg = float64(sum) / float64(cnt)
+		}
+		res = append(res, GroupScoreRow{GroupID: gid, GroupName: groupName[gid], Score: avg})
+	}
+
+	sort.Slice(res, func(i, j int) bool {
+		if res[i].Score == res[j].Score {
+			return res[i].GroupID < res[j].GroupID
+		}
+		return res[i].Score > res[j].Score
+	})
 	return res, nil
 }

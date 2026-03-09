@@ -31,6 +31,17 @@ type GroupListResp struct {
 	Items []GroupResp `json:"items"`
 }
 
+type GroupRankResp struct {
+	Rank      int64     `json:"rank"`
+	Highlight bool      `json:"highlight"`
+	Group     GroupResp `json:"group"`
+	Score     float64   `json:"score"`
+}
+
+type GroupRankingResp struct {
+	Items []GroupRankResp `json:"items"`
+}
+
 type GroupResp struct {
 	Id        int64   `json:"id"`
 	Name      string  `json:"name"`
@@ -65,6 +76,7 @@ type PageReq struct {
 type RankingReq struct {
 	Month       string `form:"month,optional" json:"month,optional"` // YYYY-MM, default current month
 	Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, month/dimensionId are ignored
+	Week        int64  `form:"week,optional" json:"week,optional"`
 	DimensionId int64  `form:"dimensionId,optional" json:"dimensionId,optional"`
 	TopN        int64  `form:"topN,optional" json:"topN,optional"`
 }

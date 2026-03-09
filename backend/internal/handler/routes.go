@@ -71,6 +71,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 			},
 			{
 				Method:  http.MethodGet,
+				Path:    "/rankings/groups",
+				Handler: GroupRankingHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodGet,
 				Path:    "/rankings/students",
 				Handler: RankingHandler(serverCtx),
 			},

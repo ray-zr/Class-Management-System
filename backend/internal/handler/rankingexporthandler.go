@@ -37,6 +37,9 @@ func RankingExportHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		filename := "总分积分排名汇总表.xlsx"
 		if !req.Total {
 			filename = "月度积分排名汇总表.xlsx"
+			if req.Week > 0 {
+				filename = "周度积分排名汇总表.xlsx"
+			}
 		}
 		w.Header().Set("Content-Disposition", contentDisposition(filename))
 		w.WriteHeader(http.StatusOK)

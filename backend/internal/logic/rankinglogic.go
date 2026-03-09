@@ -34,7 +34,11 @@ func (l *RankingLogic) Ranking(req *types.RankingReq) (resp *types.RankingResp, 
 	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
-	if req.Total {
+	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.Total, req.Week)
+	if rangeErr != nil {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: rangeErr.Error()}
+	}
+	if isTotal {
 		rows, err := l.svcCtx.RankingRepo.StudentTotalScoreRanking(l.ctx)
 		if err != nil {
 			return nil, err
@@ -45,17 +49,7 @@ func (l *RankingLogic) Ranking(req *types.RankingReq) (resp *types.RankingResp, 
 		}
 		return rankRows(rows, topN), nil
 	}
-	month := req.Month
-	now := time.Now()
-	if month == "" {
-		month = now.Format("2006-01")
-	}
-	monthStart, err := time.ParseInLocation("2006-01", month, time.Local)
-	if err != nil {
-		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid month"}
-	}
-	monthEnd := monthStart.AddDate(0, 1, 0)
-	rows, err := l.svcCtx.RankingRepo.StudentTotals(l.ctx, monthStart, monthEnd, req.DimensionId)
+	rows, err := l.svcCtx.RankingRepo.StudentTotals(l.ctx, start, end, req.DimensionId)
 	if err != nil {
 		return nil, err
 	}

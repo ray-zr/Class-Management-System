@@ -38,19 +38,14 @@ func (l *RankingExportLogic) RankingExport(req *types.RankingReq) (file []byte, 
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
 	var rows []repository.StudentScoreRow
-	if req.Total {
+	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.Total, req.Week)
+	if rangeErr != nil {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: rangeErr.Error()}
+	}
+	if isTotal {
 		rows, err = l.svcCtx.RankingRepo.StudentTotalScoreRanking(l.ctx)
 	} else {
-		month := req.Month
-		if month == "" {
-			month = time.Now().Format("2006-01")
-		}
-		monthStart, err := time.ParseInLocation("2006-01", month, time.Local)
-		if err != nil {
-			return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid month"}
-		}
-		monthEnd := monthStart.AddDate(0, 1, 0)
-		rows, err = l.svcCtx.RankingRepo.StudentTotals(l.ctx, monthStart, monthEnd, req.DimensionId)
+		rows, err = l.svcCtx.RankingRepo.StudentTotals(l.ctx, start, end, req.DimensionId)
 	}
 	if err != nil {
 		return nil, err
@@ -59,6 +54,9 @@ func (l *RankingExportLogic) RankingExport(req *types.RankingReq) (file []byte, 
 	f := excelize.NewFile()
 	sheet := f.GetSheetName(0)
 	sheetName := "月度积分排名汇总表"
+	if req.Week > 0 {
+		sheetName = "周度积分排名汇总表"
+	}
 	if req.Total {
 		sheetName = "总分积分排名汇总表"
 	}
