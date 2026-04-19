@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"class-management-system/backend/internal/logic"
 	"class-management-system/backend/internal/svc"
@@ -29,17 +28,10 @@ func RankingExportHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			httpx.ErrorCtx(r.Context(), w, err)
 			return
 		}
-		month := req.Month
-		if !req.Total && month == "" {
-			month = time.Now().Format("2006-01")
-		}
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		filename := "总分积分排名汇总表.xlsx"
 		if !req.Total {
-			filename = "月度积分排名汇总表.xlsx"
-			if req.Week > 0 {
-				filename = "周度积分排名汇总表.xlsx"
-			}
+			filename = "积分排名汇总表.xlsx"
 		}
 		w.Header().Set("Content-Disposition", contentDisposition(filename))
 		w.WriteHeader(http.StatusOK)

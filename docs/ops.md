@@ -46,14 +46,14 @@ curl -i http://127.0.0.1/api/health
 
 默认账号来自配置文件 `backend/etc/cms-api.docker.yaml`：
 
-- 用户名：`teacher`
-- 密码：`teacher`
+- 用户名：`Missing`
+- 密码：`2025106`
 
 登录：
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \
-  -d '{"username":"teacher","password":"teacher"}' \
+  -d '{"username":"Missing","password":"2025106"}' \
   http://127.0.0.1/api/auth/login
 ```
 

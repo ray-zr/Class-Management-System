@@ -6,8 +6,8 @@ Mysql:
   Dsn: "cms:cms@tcp(127.0.0.1:3306)/cms?charset=utf8mb4&parseTime=True&loc=Local"
 
 Auth:
-  Username: "teacher"
-  PasswordHash: "$2a$10$L4HtI9LTmoWAZUa6fGhUaOmEacea/T3w7xFW4plRmTttDuhemZo.6"
+  Username: "Missing"
+  PasswordHash: "$2b$10$bKLDdZvhdjY4smrFdlrAJunUgrSnQ7EiY7NtS3ah7uAevgTqDh2Uy"
   JwtSecret: "replace-me-in-production"
   JwtExpireSec: 86400
 

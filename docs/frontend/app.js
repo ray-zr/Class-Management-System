@@ -86,6 +86,22 @@ function downloadWithAuth(path, params = {}, filename = "download.xlsx") {
   xhr.send();
 }
 
+function createTimerState(min = 5, sec = 0) {
+  const safeMin = Math.max(0, Math.min(240, Math.floor(Number(min) || 0)));
+  const safeSec = Math.max(0, Math.min(59, Math.floor(Number(sec) || 0)));
+  const targetMs = (safeMin * 60 + safeSec) * 1000;
+  return {
+    mode: "countdown",
+    running: false,
+    presetMin: safeMin,
+    presetSec: safeSec,
+    targetMs,
+    leftMs: targetMs,
+    lastTick: 0,
+    timeoutId: 0,
+  };
+}
+
 const appState = {
   route: getToken() ? "students" : "login",
   me: null,
@@ -111,30 +127,26 @@ const appState = {
   rollcallPickCount: 1,
   rollcall: { roundId: "", students: [], remaining: 0 },
   groupsStudentKeyword: "",
-  timerPresetMin: 5,
-  timerPresetSec: 0,
-  timer: {
-    mode: "countdown",
-    running: false,
-    targetMs: 5 * 60 * 1000,
-    leftMs: 5 * 60 * 1000,
-    lastTick: 0,
-    timeoutId: 0,
-  },
+  timers: [createTimerState(5, 0), createTimerState(5, 0)],
 };
 
-function stopTimerLoop() {
-  if (appState.timer.timeoutId) {
-    clearTimeout(appState.timer.timeoutId);
-    appState.timer.timeoutId = 0;
+function stopTimerLoop(timerIndex) {
+  const timer = appState.timers[timerIndex];
+  if (!timer) return;
+  if (timer.timeoutId) {
+    clearTimeout(timer.timeoutId);
+    timer.timeoutId = 0;
   }
 }
 
-function syncTimerUI() {
-  const clock = document.getElementById("timer-clock");
-  if (clock) clock.textContent = fmtClock(appState.timer.leftMs);
-  const btn = document.getElementById("timer-start-btn");
-  if (btn) btn.textContent = appState.timer.running ? "暂停" : "开始";
+function syncTimerUI(timerIndex) {
+  const timer = appState.timers[timerIndex];
+  if (!timer) return;
+  const uiIndex = timerIndex + 1;
+  const clock = document.getElementById(`timer-clock-${uiIndex}`);
+  if (clock) clock.textContent = fmtClock(timer.leftMs);
+  const btn = document.getElementById(`timer-start-btn-${uiIndex}`);
+  if (btn) btn.textContent = timer.running ? "暂停" : "开始";
 }
 
 function clearScoreDraft() {
@@ -369,8 +381,8 @@ async function rollcallReset(roundId) {
 }
 
 function viewLogin() {
-  const username = el("input", { type: "text", value: "teacher" });
-  const password = el("input", { type: "password", value: "teacher" });
+  const username = el("input", { type: "text", value: "Missing" });
+  const password = el("input", { type: "password", value: "2025106" });
   const btn = el("button", {
     class: "btn btn-amber",
     text: "登录",
@@ -1662,10 +1674,10 @@ function viewRankings() {
   ]);
   typeSel.value = appState.rankingsType || "students";
 
-  const month = el("input", { type: "month" });
-  const week = el("select");
-  week.appendChild(el("option", { value: "", text: "整月" }));
-  for (let i = 1; i <= 6; i++) week.appendChild(el("option", { value: String(i), text: `第 ${i} 周` }));
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startDate = el("input", { type: "date", value: `${monthStart.getFullYear()}-${pad2(monthStart.getMonth() + 1)}-${pad2(monthStart.getDate())}` });
+  const endDate = el("input", { type: "date", value: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}` });
   const total = el("input", { type: "checkbox" });
   const dim = el("select");
   dim.appendChild(el("option", { value: "", text: "全部维度" }));
@@ -1674,8 +1686,8 @@ function viewRankings() {
   }
   const syncTotal = () => {
     const on = !!total.checked;
-    month.disabled = on;
-    week.disabled = on;
+    startDate.disabled = on;
+    endDate.disabled = on;
     dim.disabled = on;
   };
   total.addEventListener("change", () => {
@@ -1695,8 +1707,8 @@ function viewRankings() {
       try {
         const params = {
           total: total.checked,
-          month: month.value,
-          week: week.value ? Number(week.value) : "",
+          startDate: startDate.value,
+          endDate: endDate.value,
           dimensionId: dim.value ? Number(dim.value) : "",
           topN: topN.value ? Number(topN.value) : "",
         };
@@ -1723,12 +1735,12 @@ function viewRankings() {
           "/rankings/students/export",
           {
             total: total.checked,
-            month: month.value,
-            week: week.value ? Number(week.value) : "",
+            startDate: startDate.value,
+            endDate: endDate.value,
             dimensionId: dim.value ? Number(dim.value) : "",
             topN: topN.value ? Number(topN.value) : "",
           },
-          total.checked ? "总分积分排名汇总表.xlsx" : week.value ? "周度积分排名汇总表.xlsx" : "月度积分排名汇总表.xlsx"
+          total.checked ? "总分积分排名汇总表.xlsx" : "积分排名汇总表.xlsx"
         );
       } catch (e) {
         toast(String(e.message || e));
@@ -1774,8 +1786,8 @@ function viewRankings() {
       el("div", { class: "row" }, [
         el("div", { class: "field" }, [el("label", { text: "类型" }), typeSel]),
         el("div", { class: "field" }, [el("label", { text: "总分榜" }), total]),
-        el("div", { class: "field" }, [el("label", { text: "月份" }), month]),
-        el("div", { class: "field" }, [el("label", { text: "周" }), week]),
+        el("div", { class: "field" }, [el("label", { text: "开始日期" }), startDate]),
+        el("div", { class: "field" }, [el("label", { text: "结束日期" }), endDate]),
         el("div", { class: "field" }, [el("label", { text: "维度" }), dim]),
         el("div", { class: "field" }, [el("label", { text: "高亮阈值" }), topN]),
         query,
@@ -1791,132 +1803,175 @@ function viewRankings() {
   return shell("排行榜", content);
 }
 
-function timerTick() {
-  stopTimerLoop();
-  if (!appState.timer.running) {
-    syncTimerUI();
+function timerTick(timerIndex) {
+  const timer = appState.timers[timerIndex];
+  if (!timer) return;
+
+  stopTimerLoop(timerIndex);
+  if (!timer.running) {
+    syncTimerUI(timerIndex);
     return;
   }
 
   const now = Date.now();
-  const dt = Math.max(0, now - appState.timer.lastTick);
-  appState.timer.lastTick = now;
+  const dt = Math.max(0, now - timer.lastTick);
+  timer.lastTick = now;
 
-  if (appState.timer.mode === "countdown") {
-    appState.timer.leftMs = Math.max(0, appState.timer.leftMs - dt);
-    if (appState.timer.leftMs === 0) appState.timer.running = false;
+  if (timer.mode === "countdown") {
+    timer.leftMs = Math.max(0, timer.leftMs - dt);
+    if (timer.leftMs === 0) timer.running = false;
   } else {
-    appState.timer.leftMs = appState.timer.leftMs + dt;
+    timer.leftMs = timer.leftMs + dt;
   }
 
-  syncTimerUI();
+  syncTimerUI(timerIndex);
 
-  appState.timer.timeoutId = setTimeout(timerTick, 200);
+  if (timer.running) {
+    timer.timeoutId = setTimeout(() => timerTick(timerIndex), 200);
+  }
 }
 
 function viewTimer() {
-  const mode = el("select", {}, [
-    el("option", { value: "countdown", text: "倒计时" }),
-    el("option", { value: "countup", text: "正计时" }),
-  ]);
-  mode.value = appState.timer.mode;
-  mode.addEventListener("change", () => {
-    appState.timer.mode = mode.value;
-    appState.timer.running = false;
-    stopTimerLoop();
-    appState.timer.leftMs = appState.timer.mode === "countdown" ? appState.timer.targetMs : 0;
-    render();
-  });
+  function startTimer(timerIndex) {
+    const timer = appState.timers[timerIndex];
+    if (!timer || timer.running) return;
+    timer.running = true;
+    timer.lastTick = Date.now();
+    syncTimerUI(timerIndex);
+    timerTick(timerIndex);
+  }
 
-  const customMin = el("input", {
-    type: "number",
-    min: "0",
-    max: "240",
-    step: "1",
-    placeholder: "分钟",
-    value: String(appState.timerPresetMin || 5),
-  });
-  const customSec = el("input", {
-    type: "number",
-    min: "0",
-    max: "59",
-    step: "1",
-    placeholder: "秒",
-    value: String(appState.timerPresetSec || 0),
-  });
-  const applyCustom = el("button", {
-    class: "btn",
-    text: "应用",
-    onclick: () => {
-      const rawM = Number(customMin.value || 0);
-      const rawS = Number(customSec.value || 0);
-      if (!Number.isFinite(rawM) || !Number.isFinite(rawS)) {
-        toast("请输入有效时间");
-        return;
-      }
-      const m = Math.max(0, Math.min(240, Math.floor(rawM)));
-      const s = Math.max(0, Math.min(59, Math.floor(rawS)));
-      if (m === 0 && s === 0) {
-        toast("时间不能为 0");
-        return;
-      }
-      appState.timerPresetMin = m;
-      appState.timerPresetSec = s;
-      appState.timer.mode = "countdown";
-      mode.value = "countdown";
-      appState.timer.targetMs = (m * 60 + s) * 1000;
-      appState.timer.leftMs = appState.timer.targetMs;
-      appState.timer.running = false;
-      stopTimerLoop();
+  function pauseTimer(timerIndex) {
+    const timer = appState.timers[timerIndex];
+    if (!timer || !timer.running) return;
+    timer.running = false;
+    stopTimerLoop(timerIndex);
+    syncTimerUI(timerIndex);
+  }
+
+  function resetTimer(timerIndex) {
+    const timer = appState.timers[timerIndex];
+    if (!timer) return;
+    timer.running = false;
+    stopTimerLoop(timerIndex);
+    timer.leftMs = timer.mode === "countdown" ? timer.targetMs : 0;
+  }
+
+  function buildTimerCard(timerIndex) {
+    const timer = appState.timers[timerIndex];
+    const uiIndex = timerIndex + 1;
+
+    const mode = el("select", {}, [
+      el("option", { value: "countdown", text: "倒计时" }),
+      el("option", { value: "countup", text: "正计时" }),
+    ]);
+    mode.value = timer.mode;
+    mode.addEventListener("change", () => {
+      timer.mode = mode.value;
+      timer.running = false;
+      stopTimerLoop(timerIndex);
+      timer.leftMs = timer.mode === "countdown" ? timer.targetMs : 0;
       render();
-    },
-  });
+    });
 
-  const presets = [1, 5, 10, 20].map((m) =>
-    el("button", {
+    const customMin = el("input", {
+      type: "number",
+      min: "0",
+      max: "240",
+      step: "1",
+      placeholder: "分钟",
+      value: String(timer.presetMin || 5),
+    });
+    const customSec = el("input", {
+      type: "number",
+      min: "0",
+      max: "59",
+      step: "1",
+      placeholder: "秒",
+      value: String(timer.presetSec || 0),
+    });
+    const applyCustom = el("button", {
       class: "btn",
-      text: `${m} 分钟`,
+      text: "应用",
       onclick: () => {
-        appState.timerPresetMin = m;
-        appState.timerPresetSec = 0;
-        appState.timer.mode = "countdown";
+        const rawM = Number(customMin.value || 0);
+        const rawS = Number(customSec.value || 0);
+        if (!Number.isFinite(rawM) || !Number.isFinite(rawS)) {
+          toast("请输入有效时间");
+          return;
+        }
+        const m = Math.max(0, Math.min(240, Math.floor(rawM)));
+        const s = Math.max(0, Math.min(59, Math.floor(rawS)));
+        if (m === 0 && s === 0) {
+          toast("时间不能为 0");
+          return;
+        }
+        timer.presetMin = m;
+        timer.presetSec = s;
+        timer.mode = "countdown";
         mode.value = "countdown";
-        appState.timer.targetMs = m * 60 * 1000;
-        appState.timer.leftMs = appState.timer.targetMs;
-        appState.timer.running = false;
-        stopTimerLoop();
+        timer.targetMs = (m * 60 + s) * 1000;
+        timer.leftMs = timer.targetMs;
+        timer.running = false;
+        stopTimerLoop(timerIndex);
         render();
       },
-    })
-  );
+    });
 
-  const start = el("button", {
-    class: "btn btn-amber",
-    text: appState.timer.running ? "暂停" : "开始",
-    id: "timer-start-btn",
-    onclick: () => {
-      appState.timer.running = !appState.timer.running;
-      appState.timer.lastTick = Date.now();
-      if (!appState.timer.running) {
-        stopTimerLoop();
-        syncTimerUI();
-        return;
-      }
+    const presets = [1, 5, 10, 20].map((m) =>
+      el("button", {
+        class: "btn",
+        text: `${m} 分钟`,
+        onclick: () => {
+          timer.presetMin = m;
+          timer.presetSec = 0;
+          timer.mode = "countdown";
+          mode.value = "countdown";
+          timer.targetMs = m * 60 * 1000;
+          timer.leftMs = timer.targetMs;
+          timer.running = false;
+          stopTimerLoop(timerIndex);
+          render();
+        },
+      })
+    );
 
-      syncTimerUI();
-      timerTick();
-    },
-  });
-  const reset = el("button", {
-    class: "btn",
-    text: "重置",
-    onclick: () => {
-      appState.timer.running = false;
-      stopTimerLoop();
-      appState.timer.leftMs = appState.timer.mode === "countdown" ? appState.timer.targetMs : 0;
-      render();
-    },
-  });
+    const start = el("button", {
+      class: "btn btn-amber",
+      text: timer.running ? "暂停" : "开始",
+      id: `timer-start-btn-${uiIndex}`,
+      onclick: () => {
+        if (timer.running) {
+          timer.running = false;
+          stopTimerLoop(timerIndex);
+          syncTimerUI(timerIndex);
+          return;
+        }
+        startTimer(timerIndex);
+      },
+    });
+    const reset = el("button", {
+      class: "btn",
+      text: "重置",
+      onclick: () => {
+        resetTimer(timerIndex);
+        render();
+      },
+    });
+
+    return el("div", { class: "card timer" }, [
+      el("h2", { text: `计时器 ${uiIndex}` }),
+      el("div", { class: "row" }, [
+        el("div", { class: "field" }, [el("label", { text: "模式" }), mode]),
+        el("div", { class: "field" }, [el("label", { text: "自定义（分:秒）" }), el("div", { class: "row" }, [customMin, customSec])]),
+        applyCustom,
+        ...presets,
+      ]),
+      el("div", { class: "clock", id: `timer-clock-${uiIndex}`, text: fmtClock(timer.leftMs) }),
+      el("div", { class: "row", style: "justify-content:center" }, [start, reset]),
+    ]);
+  }
+
   const fs = el("button", {
     class: "btn",
     text: document.fullscreenElement ? "退出全屏" : "全屏",
@@ -1931,21 +1986,38 @@ function viewTimer() {
     },
   });
 
+  const startBoth = el("button", {
+    class: "btn btn-amber",
+    text: "同时开始",
+    onclick: () => {
+      for (let i = 0; i < appState.timers.length; i++) {
+        startTimer(i);
+      }
+    },
+  });
+  const pauseBoth = el("button", {
+    class: "btn",
+    text: "同时暂停",
+    onclick: () => {
+      for (let i = 0; i < appState.timers.length; i++) {
+        pauseTimer(i);
+      }
+    },
+  });
+  const resetBoth = el("button", {
+    class: "btn",
+    text: "同时重置",
+    onclick: () => {
+      for (let i = 0; i < appState.timers.length; i++) {
+        resetTimer(i);
+      }
+      render();
+    },
+  });
+
   const content = el("div", { class: "grid" }, [
-    el("div", { class: "card" }, [
-      el("h2", { text: "模式与预设" }),
-      el("div", { class: "row" }, [
-        el("div", { class: "field" }, [el("label", { text: "模式" }), mode]),
-        el("div", { class: "field" }, [el("label", { text: "自定义（分:秒）" }), el("div", { class: "row" }, [customMin, customSec])]),
-        applyCustom,
-        ...presets,
-      ]),
-    ]),
-    el("div", { class: "card timer" }, [
-      el("h2", { text: "显示" }),
-      el("div", { class: "clock", id: "timer-clock", text: fmtClock(appState.timer.leftMs) }),
-      el("div", { class: "row", style: "justify-content:center" }, [start, reset, fs]),
-    ]),
+    el("div", { class: "card" }, [el("h2", { text: "页面控制" }), el("div", { class: "row" }, [startBoth, pauseBoth, resetBoth, fs])]),
+    el("div", { class: "timer-dual" }, [buildTimerCard(0), buildTimerCard(1)]),
   ]);
 
   return shell("计时器", content);

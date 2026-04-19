@@ -34,7 +34,7 @@ func (l *RankingLogic) Ranking(req *types.RankingReq) (resp *types.RankingResp, 
 	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
-	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.Total, req.Week)
+	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.StartDate, req.EndDate, req.Total)
 	if rangeErr != nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: rangeErr.Error()}
 	}

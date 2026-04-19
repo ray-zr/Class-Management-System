@@ -38,7 +38,7 @@ func (l *RankingExportLogic) RankingExport(req *types.RankingReq) (file []byte, 
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
 	var rows []repository.StudentScoreRow
-	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.Total, req.Week)
+	start, end, isTotal, rangeErr := rankingRange(time.Now(), req.Month, req.StartDate, req.EndDate, req.Total)
 	if rangeErr != nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: rangeErr.Error()}
 	}
@@ -53,10 +53,7 @@ func (l *RankingExportLogic) RankingExport(req *types.RankingReq) (file []byte, 
 
 	f := excelize.NewFile()
 	sheet := f.GetSheetName(0)
-	sheetName := "月度积分排名汇总表"
-	if req.Week > 0 {
-		sheetName = "周度积分排名汇总表"
-	}
+	sheetName := "积分排名汇总表"
 	if req.Total {
 		sheetName = "总分积分排名汇总表"
 	}

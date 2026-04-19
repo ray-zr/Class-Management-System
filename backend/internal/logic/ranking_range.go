@@ -5,9 +5,26 @@ import (
 	"time"
 )
 
-func rankingRange(now time.Time, month string, total bool, week int64) (start time.Time, end time.Time, isTotal bool, err error) {
+func rankingRange(now time.Time, month, startDate, endDate string, total bool) (start time.Time, end time.Time, isTotal bool, err error) {
 	if total {
 		return time.Time{}, time.Time{}, true, nil
+	}
+	if (startDate == "") != (endDate == "") {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("startDate and endDate must be provided together")
+	}
+	if startDate != "" && endDate != "" {
+		start, err = time.ParseInLocation("2006-01-02", startDate, time.Local)
+		if err != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("invalid startDate")
+		}
+		endDay, parseErr := time.ParseInLocation("2006-01-02", endDate, time.Local)
+		if parseErr != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("invalid endDate")
+		}
+		if endDay.Before(start) {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("endDate must be on or after startDate")
+		}
+		return start, endDay.AddDate(0, 0, 1), false, nil
 	}
 	if month == "" {
 		month = now.Format("2006-01")
@@ -16,18 +33,5 @@ func rankingRange(now time.Time, month string, total bool, week int64) (start ti
 	if err != nil {
 		return time.Time{}, time.Time{}, false, fmt.Errorf("invalid month")
 	}
-	monthEnd := monthStart.AddDate(0, 1, 0)
-
-	if week <= 0 {
-		return monthStart, monthEnd, false, nil
-	}
-	weekStart := monthStart.AddDate(0, 0, int((week-1)*7))
-	if !weekStart.Before(monthEnd) {
-		return time.Time{}, time.Time{}, false, fmt.Errorf("invalid week")
-	}
-	weekEnd := weekStart.AddDate(0, 0, 7)
-	if weekEnd.After(monthEnd) {
-		weekEnd = monthEnd
-	}
-	return weekStart, weekEnd, false, nil
+	return monthStart, monthStart.AddDate(0, 1, 0), false, nil
 }

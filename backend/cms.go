@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"class-management-system/backend/internal/config"
@@ -23,6 +24,7 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 	"github.com/zeromicro/go-zero/rest/httpx"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +35,18 @@ func main() {
 
 	var c config.Config
 	conf.MustLoad(*configFile, &c)
+	if v := os.Getenv("CMS_AUTH_USERNAME"); v != "" {
+		c.Auth.Username = v
+	}
+	if v := os.Getenv("CMS_AUTH_PASSWORD_HASH"); v != "" {
+		c.Auth.PasswordHash = v
+	} else if v := os.Getenv("CMS_AUTH_PASSWORD"); v != "" {
+		h, err := bcrypt.GenerateFromPassword([]byte(v), 10)
+		if err != nil {
+			panic(err)
+		}
+		c.Auth.PasswordHash = string(h)
+	}
 	httpx.SetErrorHandler(func(err error) (int, any) {
 		switch e := err.(type) {
 		case *httperr.Error:

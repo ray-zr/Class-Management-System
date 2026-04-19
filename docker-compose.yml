@@ -26,6 +26,8 @@ services:
       - ./backend/etc/cms-api.docker.yaml:/app/etc/cms-api.yaml:ro
     environment:
       TZ: Asia/Shanghai
+      CMS_AUTH_USERNAME: Missing
+      CMS_AUTH_PASSWORD: "2025106"
 
   web:
     image: nginx:1.27-alpine

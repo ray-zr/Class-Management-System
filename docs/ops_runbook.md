@@ -200,7 +200,7 @@ docker compose restart cms-api
 
 ## 4. 如何修改登录用户名与密码（最常用）
 
-账号来自配置文件：`backend/etc/cms-api.docker.yaml`，字段：
+账号来自配置文件：`backend/etc/cms-api.docker.yaml`（Compose 还可通过环境变量覆盖），字段：
 
 - `Auth.Username`
 - `Auth.PasswordHash`（bcrypt hash，不是明文密码）
@@ -227,7 +227,7 @@ PY
 
 ```yaml
 Auth:
-  Username: "teacher"
+  Username: "Missing"
   PasswordHash: "$2b$10$...."
   JwtSecret: "replace-me-in-production"
   JwtExpireSec: 86400

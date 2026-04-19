@@ -149,8 +149,9 @@ type (
 	// Rankings
 	RankingReq {
 		Month       string `form:"month,optional" json:"month,optional"` // YYYY-MM, default current month
-		Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, month/dimensionId are ignored
-		Week        int64  `form:"week,optional" json:"week,optional"`
+		StartDate   string `form:"startDate,optional" json:"startDate,optional"` // YYYY-MM-DD, inclusive
+		EndDate     string `form:"endDate,optional" json:"endDate,optional"` // YYYY-MM-DD, inclusive
+		Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, time filters/dimensionId are ignored
 		DimensionId int64  `form:"dimensionId,optional" json:"dimensionId,optional"`
 		TopN        int64  `form:"topN,optional" json:"topN,optional"`
 	}
@@ -297,4 +298,3 @@ service cms-api {
 	@handler RollcallReset
 	post /rollcall/reset (RollcallResetReq) returns (Empty)
 }
-

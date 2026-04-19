@@ -224,7 +224,7 @@ a { color: inherit; }
   color: var(--muted);
 }
 
-input[type="text"], input[type="password"], input[type="month"], input[type="number"], select {
+input[type="text"], input[type="password"], input[type="month"], input[type="date"], input[type="number"], select {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.70);
   border-radius: 12px;
@@ -320,9 +320,22 @@ input:focus, select:focus {
   border: 1px solid var(--line);
 }
 
+.timer-dual {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .timer-dual {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
-  input[type="text"], input[type="password"], input[type="month"], input[type="number"], select { min-width: 160px; }
+  input[type="text"], input[type="password"], input[type="month"], input[type="date"], input[type="number"], select { min-width: 160px; }
   .grid.cols-2 { grid-template-columns: 1fr; }
 }

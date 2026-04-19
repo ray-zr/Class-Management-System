@@ -8,7 +8,7 @@
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \
-  -d '{"username":"teacher","password":"teacher"}' \
+  -d '{"username":"Missing","password":"2025106"}' \
   http://127.0.0.1/api/auth/login
 ```
 

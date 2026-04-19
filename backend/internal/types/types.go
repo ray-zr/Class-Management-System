@@ -74,9 +74,10 @@ type PageReq struct {
 }
 
 type RankingReq struct {
-	Month       string `form:"month,optional" json:"month,optional"` // YYYY-MM, default current month
-	Total       bool   `form:"total,optional" json:"total,optional"` // total ranking (all-time by student.total_score); when true, month/dimensionId are ignored
-	Week        int64  `form:"week,optional" json:"week,optional"`
+	Month       string `form:"month,optional" json:"month,optional"`
+	StartDate   string `form:"startDate,optional" json:"startDate,optional"`
+	EndDate     string `form:"endDate,optional" json:"endDate,optional"`
+	Total       bool   `form:"total,optional" json:"total,optional"`
 	DimensionId int64  `form:"dimensionId,optional" json:"dimensionId,optional"`
 	TopN        int64  `form:"topN,optional" json:"topN,optional"`
 }
