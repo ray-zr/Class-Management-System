@@ -45,7 +45,12 @@ async function apiFetch(path, opts = {}) {
   const ct = res.headers.get("content-type") || "";
   const body = ct.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) {
-    const msg = body && body.message ? body.message : typeof body === "string" ? body : "request failed";
+    const textBody = typeof body === "string" ? body.trim() : "";
+    const msg = body && body.message
+      ? body.message
+      : textBody && !ct.includes("text/html") && !textBody.startsWith("<") && textBody.length <= 200
+        ? textBody
+        : `请求失败（HTTP ${res.status}）`;
     throw new Error(msg);
   }
   return body;
@@ -398,41 +403,56 @@ async function rollcallReset(roundId) {
 }
 
 function viewLogin() {
-  const username = el("input", { type: "text", autocomplete: "username" });
-  const password = el("input", { type: "password", autocomplete: "current-password" });
+  const username = el("input", { type: "text", autocomplete: "username", placeholder: "请输入用户名", autofocus: "" });
+  const password = el("input", { type: "password", autocomplete: "current-password", placeholder: "请输入密码" });
   const btn = el("button", {
     class: "btn btn-amber",
     text: "登录",
-    onclick: async () => {
+    type: "submit",
+  });
+
+  const form = el("form", {
+    class: "login-form",
+    onsubmit: async (event) => {
+      event.preventDefault();
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = "正在登录...";
       try {
         const res = await fetch(`${API}/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username: username.value, password: password.value }),
         });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.message || "login failed");
+        const ct = res.headers.get("content-type") || "";
+        const body = ct.includes("application/json") ? await res.json() : await res.text();
+        if (!res.ok) {
+          const msg = body && body.message ? body.message : `登录失败（HTTP ${res.status}）`;
+          throw new Error(msg);
+        }
         setToken(body.accessToken);
         await loadBootstrap();
         appState.route = "students";
         render();
       } catch (e) {
         toast(String(e.message || e));
+        btn.disabled = false;
+        btn.textContent = "登录";
       }
     },
-  });
+  }, [
+    el("div", { class: "field" }, [el("label", { text: "用户名" }), username]),
+    el("div", { class: "field" }, [el("label", { text: "密码" }), password]),
+    btn,
+  ]);
 
-  return el("div", { class: "main" }, [
-    el("div", { class: "card", style: "max-width:520px;margin:10vh auto 0;" }, [
-      el("h2", { text: "登录" }),
-      el("div", { class: "grid" }, [
-        el("div", { class: "field" }, [el("label", { text: "用户名" }), username]),
-        el("div", { class: "field" }, [el("label", { text: "密码" }), password]),
-        el("div", { class: "row" }, [btn]),
-        el("p", { style: "margin:0;color:var(--muted);font-size:12px;" }, [
-          "界面为后端配套的轻量前端。",
-        ]),
+  return el("main", { class: "login-screen" }, [
+    el("section", { class: "card login-card", "aria-labelledby": "login-title" }, [
+      el("div", { class: "login-heading" }, [
+        el("p", { class: "login-eyebrow", text: "智慧班级" }),
+        el("h1", { id: "login-title", text: "欢迎回来" }),
       ]),
+      form,
     ]),
   ]);
 }
@@ -514,10 +534,7 @@ function shell(title, content) {
     el("main", { class: "main" }, [
       el("div", { class: "topbar" }, [
         el("h2", { class: "title", text: title }),
-        el("div", { class: "row" }, [
-          el("span", { class: "pill" }, [el("span", { text: "API" }), el("a", { href: "/api/health", text: "/api" })]),
-          logout,
-        ]),
+        logout,
       ]),
       content,
     ]),
