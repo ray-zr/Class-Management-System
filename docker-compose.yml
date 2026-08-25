@@ -26,8 +26,9 @@ services:
       - ./backend/etc/cms-api.docker.yaml:/app/etc/cms-api.yaml:ro
     environment:
       TZ: Asia/Shanghai
-      CMS_AUTH_USERNAME: Missing
-      CMS_AUTH_PASSWORD: "2025106"
+      CMS_AUTH_USERNAME: "${CMS_AUTH_USERNAME:?CMS_AUTH_USERNAME is required}"
+      CMS_AUTH_PASSWORD_HASH: "${CMS_AUTH_PASSWORD_HASH:?CMS_AUTH_PASSWORD_HASH is required}"
+      CMS_AUTH_JWT_SECRET: "${CMS_AUTH_JWT_SECRET:?CMS_AUTH_JWT_SECRET is required}"
 
   web:
     image: nginx:1.27-alpine

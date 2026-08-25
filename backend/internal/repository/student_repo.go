@@ -23,25 +23,49 @@ func (r *StudentRepo) Create(ctx context.Context, s *model.Student) error {
 	return r.db.WithContext(ctx).Create(s).Error
 }
 
-func (r *StudentRepo) UpsertByStudentNo(ctx context.Context, s *model.Student) error {
+func (r *StudentRepo) CreateOrRestoreByStudentNo(ctx context.Context, s *model.Student) (*model.Student, error) {
 	if s == nil || s.StudentNo == "" {
-		return gorm.ErrInvalidData
+		return nil, gorm.ErrInvalidData
 	}
-	if err := r.Create(ctx, s); err == nil {
-		return nil
-	} else {
+	var restored *model.Student
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		createErr := tx.Create(s).Error
+		if createErr == nil {
+			restored = s
+			return nil
+		}
 		var me *mysql.MySQLError
-		if !errors.As(err, &me) || me.Number != 1062 {
-			return err
+		if !errors.As(createErr, &me) || me.Number != 1062 {
+			return createErr
+		}
+
+		var existing model.Student
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("student_no = ?", s.StudentNo).First(&existing).Error; err != nil {
+			return createErr
+		}
+		if !existing.DeletedAt.Valid {
+			return createErr
 		}
 		updates := map[string]any{
-			"name":     s.Name,
-			"gender":   s.Gender,
-			"phone":    s.Phone,
-			"position": s.Position,
+			"name":       s.Name,
+			"gender":     s.Gender,
+			"phone":      s.Phone,
+			"position":   s.Position,
+			"group_id":   0,
+			"deleted_at": nil,
 		}
-		return r.db.WithContext(ctx).Model(&model.Student{}).Where("student_no = ?", s.StudentNo).Updates(updates).Error
-	}
+		if err := tx.Unscoped().Model(&model.Student{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		var current model.Student
+		if err := tx.First(&current, existing.ID).Error; err != nil {
+			return err
+		}
+		restored = &current
+		return nil
+	})
+	return restored, err
 }
 
 func (r *StudentRepo) BatchUpsertByStudentNo(ctx context.Context, students []model.Student) error {
@@ -53,10 +77,19 @@ func (r *StudentRepo) BatchUpsertByStudentNo(ctx context.Context, students []mod
 			return gorm.ErrInvalidData
 		}
 	}
+	studentNos := make([]string, 0, len(students))
+	for i := range students {
+		studentNos = append(studentNos, students[i].StudentNo)
+	}
+	if err := r.db.WithContext(ctx).Unscoped().Model(&model.Student{}).
+		Where("student_no IN ? AND deleted_at IS NOT NULL", studentNos).
+		Updates(map[string]any{"group_id": 0, "deleted_at": nil}).Error; err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "student_no"}},
-			DoUpdates: clause.AssignmentColumns([]string{"name", "gender", "phone", "position"}),
+			DoUpdates: clause.AssignmentColumns([]string{"name", "gender", "phone", "position", "deleted_at"}),
 		}).
 		Create(&students).Error
 }
@@ -70,15 +103,64 @@ func (r *StudentRepo) Get(ctx context.Context, id int64) (*model.Student, error)
 	return &s, nil
 }
 
+func (r *StudentRepo) GetForUpdate(ctx context.Context, id int64) (*model.Student, error) {
+	var student model.Student
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&student, id).Error; err != nil {
+		return nil, err
+	}
+	return &student, nil
+}
+
+func (r *StudentRepo) ListForUpdate(ctx context.Context, groupID int64) ([]model.Student, error) {
+	query := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.Student{})
+	if groupID > 0 {
+		query = query.Where("group_id = ?", groupID)
+	}
+	var students []model.Student
+	if err := query.Order("id asc").Find(&students).Error; err != nil {
+		return nil, err
+	}
+	return students, nil
+}
+
+func (r *StudentRepo) AddScore(ctx context.Context, id, score int64) error {
+	return r.db.WithContext(ctx).Model(&model.Student{}).
+		Where("id = ?", id).
+		Update("total_score", gorm.Expr("total_score + ?", score)).Error
+}
+
 func (r *StudentRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.Student{}, id).Error
+	result := r.db.WithContext(ctx).Delete(&model.Student{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *StudentRepo) Update(ctx context.Context, id int64, updates map[string]any) (*model.Student, error) {
-	if err := r.db.WithContext(ctx).Model(&model.Student{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return nil, err
-	}
-	return r.Get(ctx, id)
+	var out *model.Student
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if groupID, ok := updates["group_id"].(int64); ok && groupID > 0 {
+			var group model.Group
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, groupID).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&model.Student{}).Where("id = ?", id).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		student, err := (&StudentRepo{db: tx}).Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		out = student
+		return nil
+	})
+	return out, err
 }
 
 type StudentListFilter struct {

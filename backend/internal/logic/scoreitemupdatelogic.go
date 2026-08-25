@@ -37,6 +37,12 @@ func (l *ScoreItemUpdateLogic) ScoreItemUpdate(id int64, req *types.ScoreItemUpd
 	if req == nil || req.DimensionId <= 0 || req.Name == "" {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
+	if err := validateText("name", req.Name, 128, true); err != nil {
+		return nil, err
+	}
+	if err := validateScoreValue(req.Score); err != nil {
+		return nil, err
+	}
 	updates := map[string]any{
 		"dimension_id": req.DimensionId,
 		"name":         req.Name,

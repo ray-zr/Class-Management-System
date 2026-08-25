@@ -5,26 +5,27 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"time"
+	"strconv"
 
 	"class-management-system/backend/internal/config"
 	"class-management-system/backend/internal/db"
 	"class-management-system/backend/internal/handler"
 	"class-management-system/backend/internal/httperr"
 	"class-management-system/backend/internal/middleware"
-	"class-management-system/backend/internal/retention"
 	"class-management-system/backend/internal/svc"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 	"github.com/zeromicro/go-zero/rest/httpx"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -35,54 +36,64 @@ func main() {
 
 	var c config.Config
 	conf.MustLoad(*configFile, &c)
-	if v := os.Getenv("CMS_AUTH_USERNAME"); v != "" {
-		c.Auth.Username = v
+	if err := config.ApplyAuthEnv(&c, os.LookupEnv); err != nil {
+		panic(fmt.Sprintf("invalid authentication configuration: %v", err))
 	}
-	if v := os.Getenv("CMS_AUTH_PASSWORD_HASH"); v != "" {
-		c.Auth.PasswordHash = v
-	} else if v := os.Getenv("CMS_AUTH_PASSWORD"); v != "" {
-		h, err := bcrypt.GenerateFromPassword([]byte(v), 10)
-		if err != nil {
-			panic(err)
-		}
-		c.Auth.PasswordHash = string(h)
-	}
-	httpx.SetErrorHandler(func(err error) (int, any) {
-		switch e := err.(type) {
-		case *httperr.Error:
-			return e.Code, map[string]any{"code": e.Code, "message": e.Msg}
-		default:
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return http.StatusNotFound, map[string]any{"code": http.StatusNotFound, "message": "not found"}
-			}
-			if errors.Is(err, gorm.ErrInvalidData) {
-				return http.StatusBadRequest, map[string]any{"code": http.StatusBadRequest, "message": "invalid request"}
-			}
-			return 500, map[string]any{"code": 500, "message": err.Error()}
-		}
-	})
+	httpx.SetErrorHandler(errorResponse)
 
 	server := rest.MustNewServer(c.RestConf)
 	defer server.Stop()
 
 	ctx := svc.NewServiceContext(c)
+	if err := db.PrepareCompatibilityMigrations(context.Background(), ctx.DB); err != nil {
+		panic(err)
+	}
 	if err := db.AutoMigrate(context.Background(), ctx.DB); err != nil {
+		panic(err)
+	}
+	if err := db.BackfillScoreEntrySnapshots(context.Background(), ctx.DB); err != nil {
 		panic(err)
 	}
 	server.Use(middleware.RequireAuth(map[string]struct{}{
 		"/api/health":     {},
 		"/api/auth/login": {},
 	}, middleware.NewAuthMiddleware(ctx)))
-	(&retention.Runner{
-		Logger:   logx.WithContext(context.Background()),
-		Cleaner:  &retention.Cleaner{Logger: logx.WithContext(context.Background()), Repo: ctx.ScoreEntryRepo},
-		Locker:   ctx.LockRepo,
-		LockName: "cms_retention_cleanup",
-		Every:    time.Duration(c.Retention.CleanupEverySec) * time.Second,
-		KeepDays: c.Retention.ScoreEntryDays,
-	}).Run(context.Background())
 	handler.RegisterHandlers(server, ctx)
 
 	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
 	server.Start()
+}
+
+func errorResponse(err error) (int, any) {
+	if e, ok := err.(*httperr.Error); ok {
+		return e.Code, map[string]any{"code": e.Code, "message": e.Msg}
+	}
+
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return http.StatusRequestEntityTooLarge, map[string]any{"code": http.StatusRequestEntityTooLarge, "message": "request body too large"}
+	}
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	var numberErr *strconv.NumError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) || errors.As(err, &numberErr) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return http.StatusBadRequest, map[string]any{"code": http.StatusBadRequest, "message": "invalid request"}
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		switch mysqlErr.Number {
+		case 1062:
+			return http.StatusConflict, map[string]any{"code": http.StatusConflict, "message": "record already exists"}
+		case 1406:
+			return http.StatusBadRequest, map[string]any{"code": http.StatusBadRequest, "message": "field value too long"}
+		}
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return http.StatusNotFound, map[string]any{"code": http.StatusNotFound, "message": "not found"}
+	}
+	if errors.Is(err, gorm.ErrInvalidData) {
+		return http.StatusBadRequest, map[string]any{"code": http.StatusBadRequest, "message": "invalid request"}
+	}
+	logx.Errorf("request failed: %v", err)
+	return http.StatusInternalServerError, map[string]any{"code": http.StatusInternalServerError, "message": "internal server error"}
 }

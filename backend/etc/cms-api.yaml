@@ -6,15 +6,8 @@ Mysql:
   Dsn: "cms:cms@tcp(127.0.0.1:3306)/cms?charset=utf8mb4&parseTime=True&loc=Local"
 
 Auth:
-  Username: "Missing"
-  PasswordHash: "$2b$10$bKLDdZvhdjY4smrFdlrAJunUgrSnQ7EiY7NtS3ah7uAevgTqDh2Uy"
-  JwtSecret: "replace-me-in-production"
   JwtExpireSec: 86400
 
 App:
   RecentScoreItemsN: 10
   RankingTopN: 5
-
-Retention:
-  ScoreEntryDays: 30
-  CleanupEverySec: 3600

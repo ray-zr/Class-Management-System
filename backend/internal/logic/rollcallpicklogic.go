@@ -5,6 +5,7 @@ package logic
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"class-management-system/backend/internal/httperr"
@@ -12,6 +13,7 @@ import (
 	"class-management-system/backend/internal/types"
 
 	"github.com/zeromicro/go-zero/core/logx"
+	"gorm.io/gorm"
 )
 
 type RollcallPickLogic struct {
@@ -29,47 +31,35 @@ func NewRollcallPickLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Roll
 }
 
 func (l *RollcallPickLogic) RollcallPick(req *types.RollcallPickReq) (resp *types.RollcallPickResp, err error) {
-	roundID, fair, ok := l.svcCtx.RollcallState.Get()
-	if !ok {
-		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall not started"}
-	}
-
-	count := int64(1)
-	if req != nil && req.Count > 0 {
-		count = req.Count
-	}
-	if count < 1 {
-		count = 1
-	}
-	if count > 50 {
-		count = 50
-	}
-
-	active, err := l.svcCtx.RollcallRepo.RoundActive(l.ctx, roundID)
+	round, err := l.svcCtx.RollcallRepo.ActiveRound(l.ctx)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall not started"}
+		}
 		return nil, err
 	}
-	if !active {
-		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall ended"}
+	roundID, fair := round.RoundID, round.Fair
+
+	requestedCount := int64(0)
+	if req != nil {
+		requestedCount = req.Count
 	}
+	count := normalizeRollcallCount(requestedCount)
 
 	items := make([]types.StudentResp, 0, int(count))
 	remaining := int64(0)
 	for i := int64(0); i < count; i++ {
-		studentID, rem, pickErr := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID, fair)
+		studentID, rem, pickErr := l.svcCtx.RollcallRepo.Pick(l.ctx, roundID)
 		if pickErr != nil {
-			if fair {
-				_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
-			}
 			if len(items) == 0 {
+				if errors.Is(pickErr, gorm.ErrRecordNotFound) {
+					return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall ended"}
+				}
 				return nil, pickErr
 			}
 			break
 		}
 		remaining = rem
-		if fair && remaining == 0 {
-			_ = l.svcCtx.RollcallRepo.EndRound(l.ctx, roundID)
-		}
 		s, getErr := l.svcCtx.StudentRepo.Get(l.ctx, studentID)
 		if getErr != nil {
 			return nil, getErr

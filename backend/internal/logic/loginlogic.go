@@ -35,6 +35,9 @@ func (l *LoginLogic) Login(req *types.LoginReq) (resp *types.LoginResp, err erro
 	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
+	if len(req.Username) > 128 || len(req.Password) > 1024 {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
+	}
 	if req.Username != l.svcCtx.Config.Auth.Username {
 		return nil, &httperr.Error{Code: http.StatusUnauthorized, Msg: "invalid credentials"}
 	}

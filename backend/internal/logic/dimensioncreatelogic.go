@@ -30,8 +30,11 @@ func NewDimensionCreateLogic(ctx context.Context, svcCtx *svc.ServiceContext) *D
 }
 
 func (l *DimensionCreateLogic) DimensionCreate(req *types.DimensionCreateReq) (resp *types.DimensionResp, err error) {
-	if req == nil || req.Name == "" {
+	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "missing name"}
+	}
+	if err := validateText("name", req.Name, 64, true); err != nil {
+		return nil, err
 	}
 	d := &model.Dimension{Name: req.Name}
 	if err := l.svcCtx.DimensionRepo.Create(l.ctx, d); err != nil {

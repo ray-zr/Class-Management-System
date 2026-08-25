@@ -51,6 +51,9 @@ func (l *StudentImportLogic) StudentImport(r *http.Request) (resp *types.Empty, 
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		return nil, err
 	}
+	if r.MultipartForm != nil {
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+	}
 	f, hdr, err := r.FormFile("file")
 	if err != nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "missing file"}
@@ -85,6 +88,10 @@ func (l *StudentImportLogic) StudentImport(r *http.Request) (resp *types.Empty, 
 	if len(rows) <= 1 {
 		return &types.Empty{}, nil
 	}
+	const maxDataRows = 500
+	if len(rows)-1 > maxDataRows {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "too many student rows (max 500)"}
+	}
 	header := rows[0]
 	studentNoH := strings.ToLower(cell(header, 0))
 	nameH := strings.ToLower(cell(header, 1))
@@ -95,19 +102,39 @@ func (l *StudentImportLogic) StudentImport(r *http.Request) (resp *types.Empty, 
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid header: column B must be Name/姓名"}
 	}
 
-	students := make([]model.Student, 0, len(rows)-1)
+	students, rowErrors := studentsFromRows(rows[1:])
+	if len(rowErrors) > 0 {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: formatImportErrors(rowErrors)}
+	}
+	if err := l.svcCtx.DB.WithContext(l.ctx).Transaction(func(tx *gorm.DB) error {
+		repo := repository.NewStudentRepo(tx)
+		return repo.BatchUpsertByStudentNo(l.ctx, students)
+	}); err != nil {
+		return nil, err
+	}
+	return &types.Empty{}, nil
+}
+
+func studentsFromRows(rows [][]string) ([]model.Student, []string) {
+	students := make([]model.Student, 0, len(rows))
 	rowErrors := make([]string, 0)
-	for i := 1; i < len(rows); i++ {
-		row := rows[i]
+	seenStudentNos := make(map[string]int, len(rows))
+	for i, row := range rows {
 		studentNo := cell(row, 0)
 		name := cell(row, 1)
 		gender := cell(row, 2)
 		phone := cell(row, 3)
 		position := cell(row, 4)
-		if studentNo == "" || name == "" {
-			rowErrors = append(rowErrors, fmt.Sprintf("row %d: missing studentNo or name", i+1))
+		rowNumber := i + 2
+		if err := validateStudentFields(studentNo, name, gender, phone, position); err != nil {
+			rowErrors = append(rowErrors, fmt.Sprintf("row %d: %v", rowNumber, err))
 			continue
 		}
+		if firstRow, exists := seenStudentNos[studentNo]; exists {
+			rowErrors = append(rowErrors, fmt.Sprintf("row %d: duplicate studentNo (first seen at row %d)", rowNumber, firstRow))
+			continue
+		}
+		seenStudentNos[studentNo] = rowNumber
 		students = append(students, model.Student{
 			StudentNo:  studentNo,
 			Name:       name,
@@ -118,16 +145,15 @@ func (l *StudentImportLogic) StudentImport(r *http.Request) (resp *types.Empty, 
 			TotalScore: 0,
 		})
 	}
-	if len(rowErrors) > 0 {
-		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: strings.Join(rowErrors, "; ")}
+	return students, rowErrors
+}
+
+func formatImportErrors(rowErrors []string) string {
+	const maxReportedErrors = 20
+	if len(rowErrors) <= maxReportedErrors {
+		return strings.Join(rowErrors, "; ")
 	}
-	if err := l.svcCtx.DB.WithContext(l.ctx).Transaction(func(tx *gorm.DB) error {
-		repo := repository.NewStudentRepo(tx)
-		return repo.BatchUpsertByStudentNo(l.ctx, students)
-	}); err != nil {
-		return nil, err
-	}
-	return &types.Empty{}, nil
+	return fmt.Sprintf("%s; and %d more error(s)", strings.Join(rowErrors[:maxReportedErrors], "; "), len(rowErrors)-maxReportedErrors)
 }
 
 func cell(row []string, idx int) string {

@@ -5,7 +5,9 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
+	"class-management-system/backend/internal/httperr"
 	"class-management-system/backend/internal/logic"
 	"class-management-system/backend/internal/svc"
 	"class-management-system/backend/internal/types"
@@ -14,8 +16,15 @@ import (
 
 func LoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		key := clientIP(r)
+		now := time.Now()
+		if !svcCtx.LoginLimiter.Allow(key, now) {
+			httpx.ErrorCtx(r.Context(), w, &httperr.Error{Code: http.StatusTooManyRequests, Msg: "too many login attempts"})
+			return
+		}
 		var req types.LoginReq
 		if err := httpx.Parse(r, &req); err != nil {
+			svcCtx.LoginLimiter.Failure(key, now)
 			httpx.ErrorCtx(r.Context(), w, err)
 			return
 		}
@@ -23,8 +32,10 @@ func LoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		l := logic.NewLoginLogic(r.Context(), svcCtx)
 		resp, err := l.Login(&req)
 		if err != nil {
+			svcCtx.LoginLimiter.Failure(key, now)
 			httpx.ErrorCtx(r.Context(), w, err)
 		} else {
+			svcCtx.LoginLimiter.Success(key)
 			httpx.OkJsonCtx(r.Context(), w, resp)
 		}
 	}

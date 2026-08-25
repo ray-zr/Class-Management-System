@@ -44,11 +44,13 @@ func (l *ScoreEntryListLogic) ScoreEntryList(req *types.ScoreEntryListReq) (resp
 	}
 	offset := (page - 1) * size
 	limit := size
-	sinceDays := req.SinceDays
-	if sinceDays <= 0 {
-		sinceDays = 30
+	if req.SinceDays < 0 || req.SinceDays > 36500 {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid sinceDays"}
 	}
-	since := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
+	var since time.Time
+	if req.SinceDays > 0 {
+		since = time.Now().Add(-time.Duration(req.SinceDays) * 24 * time.Hour)
+	}
 
 	total, items, err := l.svcCtx.ScoreEntryRepo.List(l.ctx, repository.ScoreEntryListFilter{
 		StudentID: req.StudentId,
@@ -62,16 +64,7 @@ func (l *ScoreEntryListLogic) ScoreEntryList(req *types.ScoreEntryListReq) (resp
 	}
 	res := make([]types.ScoreEntryResp, 0, len(items))
 	for _, e := range items {
-		res = append(res, types.ScoreEntryResp{
-			Id:          e.ID,
-			StudentId:   e.StudentID,
-			GroupId:     e.GroupID,
-			DimensionId: e.DimensionID,
-			ScoreItemId: e.ScoreItemID,
-			Score:       e.Score,
-			Remark:      e.Remark,
-			CreatedAt:   e.CreatedAt.Unix(),
-		})
+		res = append(res, *scoreEntryResp(&e))
 	}
 	return &types.ScoreEntryListResp{Total: total, Items: res}, nil
 }

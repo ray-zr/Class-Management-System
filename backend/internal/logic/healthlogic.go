@@ -27,7 +27,12 @@ func NewHealthLogic(ctx context.Context, svcCtx *svc.ServiceContext) *HealthLogi
 }
 
 func (l *HealthLogic) Health() (resp *types.Empty, err error) {
-	// todo: add your logic here and delete this line
-
-	return
+	sqlDB, err := l.svcCtx.DB.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := sqlDB.PingContext(l.ctx); err != nil {
+		return nil, err
+	}
+	return &types.Empty{}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"class-management-system/backend/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GroupRepo struct {
@@ -38,6 +39,14 @@ func (r *GroupRepo) Get(ctx context.Context, id int64) (*model.Group, error) {
 	return &g, nil
 }
 
+func (r *GroupRepo) GetForUpdate(ctx context.Context, id int64) (*model.Group, error) {
+	var group model.Group
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, id).Error; err != nil {
+		return nil, err
+	}
+	return &group, nil
+}
+
 func (r *GroupRepo) UpdateName(ctx context.Context, id int64, name string) (*model.Group, error) {
 	if err := r.db.WithContext(ctx).Model(&model.Group{}).Where("id = ?", id).Update("name", name).Error; err != nil {
 		return nil, err
@@ -47,10 +56,14 @@ func (r *GroupRepo) UpdateName(ctx context.Context, id int64, name string) (*mod
 
 func (r *GroupRepo) Delete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var group model.Group
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, id).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&model.Student{}).Where("group_id = ?", id).Update("group_id", 0).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&model.Group{}, id).Error
+		return tx.Delete(&group).Error
 	})
 }
 

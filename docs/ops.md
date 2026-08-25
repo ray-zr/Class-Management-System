@@ -1,89 +1,97 @@
-# 运维与部署指南（本机云服务器）
+# 运维与部署指南（本机或云服务器）
 
-更详细的运维手册（含宕机恢复、备份恢复、修改账号密码）见：`docs/ops_runbook.md`。
+更完整的恢复、备份和账号轮换步骤见 `docs/ops_runbook.md`。
 
-## 依赖
+## 依赖与端口
 
 - Docker / Docker Compose
+- Web：宿主机 `80`，提供前端和 `/api/` 反向代理
+- MySQL：宿主机 `127.0.0.1:13306`，不对公网开放
 
-## 端口说明
-
-默认 Compose 端口映射：
-
-- MySQL：宿主机 `13306` -> 容器 `3306`
-- Web（前端 + API 反代）：宿主机 `80` -> 容器 `80`
-
-（为避免与宿主机常见占用端口冲突。）
-
-## 启动
-
-在仓库根目录：
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-健康检查：
-
-```bash
-curl -i http://127.0.0.1/api/health
-```
-
-浏览器访问：
+当前部署按项目约束继续使用 HTTP：
 
 - 本机：`http://127.0.0.1/`
 - 公网：`http://<your-server-ip-or-domain>/`
 
-前端功能入口：
+## 首次配置
 
-- 学生名单：支持 Excel 导入（`.xlsx`）
-- 积分录入：最近使用置顶、加/减按钮色彩语义（绿/红）
-- 随机点名：支持公平模式；点名结果可一键跳转到积分录入并自动选中该学生
-- 排行榜：支持筛选与导出 Excel（走鉴权下载）
+仓库不提供默认登录账号、明文密码或 JWT 密钥。首次启动前创建本地 `.env`：
 
-## 登录账号
+```bash
+cp .env.example .env
+go run ./tools/hash_password
+openssl rand -hex 32
+```
 
-默认账号来自配置文件 `backend/etc/cms-api.docker.yaml`：
+运行密码哈希工具后，在标准输入中输入新密码并回车。将输出的 bcrypt 哈希和随机 JWT 密钥分别填入 `.env`：
 
-- 用户名：`Missing`
-- 密码：`2025106`
+```dotenv
+CMS_AUTH_USERNAME=your-admin-name
+CMS_AUTH_PASSWORD_HASH='$2a$10$replace-with-generated-hash'
+CMS_AUTH_JWT_SECRET=replace-with-generated-random-secret
+```
 
-登录：
+`CMS_AUTH_PASSWORD_HASH` 应保留单引号，避免 bcrypt 哈希中的 `$` 被 Compose 解析。`.env` 已被 Git 忽略，不要提交真实凭据。
+
+启动前可先校验 Compose 配置：
+
+```bash
+docker compose config --quiet
+```
+
+## 启动与验证
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl -i http://127.0.0.1/api/health
+```
+
+健康检查会实际探测数据库连接。后端首次启动会执行兼容迁移和历史快照回填，不会清理积分明细。
+
+## 从旧版本升级到 2.0.0
+
+先按 `docs/ops_runbook.md` 备份数据库，并确保 MySQL 容器正在运行。随后在仓库根目录执行版本迁移脚本：
+
+```bash
+docker compose exec -T mysql \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+  < deploy/sql/dev-2.0.0.sql
+```
+
+脚本可以重复执行，不会清理积分明细。它会增加软删除、历史快照和计分幂等结构，并在建立公平点名唯一索引前去除重复的临时点名记录。迁移完成后再执行 `docker compose up -d --build` 更新服务。
+
+登录示例中的值应替换为 `.env` 中设置的账号和实际密码：
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \
-  -d '{"username":"Missing","password":"2025106"}' \
+  -d '{"username":"your-admin-name","password":"your-password"}' \
   http://127.0.0.1/api/auth/login
 ```
 
-## 配置
+## 凭据轮换
 
-API 容器内读取：`/app/etc/cms-api.yaml`。
+修改用户名或密码时，重新生成 bcrypt 哈希并更新 `.env`，然后重建后端容器：
 
-Compose 通过只读 volume 挂载：
+```bash
+docker compose up -d --force-recreate cms-api
+```
 
-- `./backend/etc/cms-api.docker.yaml:/app/etc/cms-api.yaml:ro`
+修改 `CMS_AUTH_JWT_SECRET` 会立即使所有旧 token 失效，之后需要重新登录。这是密钥轮换的预期行为。
 
-排行榜高亮阈值默认值来自配置：
+## 数据保留与备份
 
-- `App.RankingTopN`：未指定 `topN` 参数时使用（默认 5）
+- 学生删除为软删除，历史积分仍保留。
+- 积分明细永久保留，只有主动撤销才删除。
+- MySQL 数据位于具名卷 `mysql_data`，普通停止、重建容器或机器重启不会删除数据。
+- 升级和凭据轮换前建议按 `docs/ops_runbook.md` 先做逻辑备份。
 
-## 日志
+## 日志与停止
 
 ```bash
 docker compose logs -f cms-api
 docker compose logs -f mysql
-```
-
-## 停止与清理
-
-```bash
 docker compose down
 ```
 
-清理 MySQL 数据（删除数据卷，数据不可恢复）：
-
-```bash
-docker compose down -v
-```
+`docker compose down -v` 会永久删除 MySQL 数据卷；除非明确要清空所有数据，否则不要执行。

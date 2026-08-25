@@ -4,9 +4,11 @@
 package svc
 
 import (
+	"time"
+
+	"class-management-system/backend/internal/auth"
 	"class-management-system/backend/internal/config"
 	"class-management-system/backend/internal/repository"
-	"class-management-system/backend/internal/rollcall"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -24,13 +26,12 @@ type ServiceContext struct {
 	ScoreEntryRepo      *repository.ScoreEntryRepo
 	RankingRepo         *repository.RankingRepo
 	RollcallRepo        *repository.RollcallRepo
-	LockRepo            *repository.LockRepo
-	RollcallState       *rollcall.State
+	LoginLimiter        *auth.LoginLimiter
 }
 
 func NewServiceContext(c config.Config) *ServiceContext {
 	db, err := gorm.Open(mysql.Open(c.Mysql.Dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		panic(err)
@@ -46,7 +47,6 @@ func NewServiceContext(c config.Config) *ServiceContext {
 		ScoreEntryRepo:      repository.NewScoreEntryRepo(db),
 		RankingRepo:         repository.NewRankingRepo(db),
 		RollcallRepo:        repository.NewRollcallRepo(db),
-		LockRepo:            repository.NewLockRepo(db),
-		RollcallState:       &rollcall.State{},
+		LoginLimiter:        auth.NewLoginLimiter(5, 5*time.Minute),
 	}
 }

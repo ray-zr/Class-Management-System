@@ -100,6 +100,7 @@ func (r *RankingRepo) StudentTotalScoreRanking(ctx context.Context) ([]StudentSc
 	q := r.db.WithContext(ctx).
 		Table("students s").
 		Joins("LEFT JOIN `groups` g ON g.id = s.group_id").
+		Where("s.deleted_at IS NULL").
 		Select(selectSQL).
 		Order("score desc, s.id asc")
 	var res []StudentScoreRow
@@ -118,7 +119,7 @@ func (r *RankingRepo) GroupTotalAvgScoreRanking(ctx context.Context) ([]GroupSco
 	)
 	q := r.db.WithContext(ctx).
 		Table("`groups` g").
-		Joins("LEFT JOIN students s ON s.group_id = g.id").
+		Joins("LEFT JOIN students s ON s.group_id = g.id AND s.deleted_at IS NULL").
 		Select(selectSQL).
 		Group("g.id").
 		Order("score desc, g.id asc")

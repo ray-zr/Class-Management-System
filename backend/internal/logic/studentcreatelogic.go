@@ -30,8 +30,11 @@ func NewStudentCreateLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Stu
 }
 
 func (l *StudentCreateLogic) StudentCreate(req *types.StudentCreateReq) (resp *types.StudentResp, err error) {
-	if req == nil || req.StudentNo == "" || req.Name == "" {
-		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "missing required fields"}
+	if req == nil {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
+	}
+	if err := validateStudentFields(req.StudentNo, req.Name, req.Gender, req.Phone, req.Position); err != nil {
+		return nil, err
 	}
 	s := &model.Student{
 		StudentNo:  req.StudentNo,
@@ -42,7 +45,8 @@ func (l *StudentCreateLogic) StudentCreate(req *types.StudentCreateReq) (resp *t
 		GroupID:    0,
 		TotalScore: 0,
 	}
-	if err := l.svcCtx.StudentRepo.Create(l.ctx, s); err != nil {
+	s, err = l.svcCtx.StudentRepo.CreateOrRestoreByStudentNo(l.ctx, s)
+	if err != nil {
 		return nil, err
 	}
 	return &types.StudentResp{

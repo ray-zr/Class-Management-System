@@ -33,6 +33,12 @@ func (l *ScoreItemCreateLogic) ScoreItemCreate(req *types.ScoreItemCreateReq) (r
 	if req == nil || req.DimensionId <= 0 || req.Name == "" {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid request"}
 	}
+	if err := validateText("name", req.Name, 128, true); err != nil {
+		return nil, err
+	}
+	if err := validateScoreValue(req.Score); err != nil {
+		return nil, err
+	}
 	it := &model.ScoreItem{DimensionID: req.DimensionId, Name: req.Name, Score: req.Score}
 	if err := l.svcCtx.ScoreItemRepo.Create(l.ctx, it); err != nil {
 		return nil, err

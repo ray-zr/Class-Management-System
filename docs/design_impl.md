@@ -2,44 +2,55 @@
 
 ## 1. 技术栈
 
-- Golang
-- go-zero（REST 服务与路由）
-- GORM（MySQL ORM）
-- MySQL 8
+- Go、go-zero REST、GORM、MySQL 8
+- 原生 HTML/CSS/JavaScript 前端，由 Nginx 托管并反向代理 `/api/`
 
-## 2. 代码结构（关键目录）
+## 2. 代码结构
 
-- `backend/cms.go`：服务入口，加载配置、注册路由、AutoMigrate、启动定时清理
-- `backend/internal/svc/servicecontext.go`：依赖注入（DB、各 Repo、RollcallState、LockRepo）
-- `backend/internal/repository/*`：数据访问层
-- `backend/internal/logic/*`：业务逻辑层
-- `backend/internal/handler/*`：HTTP handler 层
+- `backend/cms.go`：加载配置、认证环境变量、兼容迁移、AutoMigrate、历史快照回填和服务启动
+- `backend/internal/svc/servicecontext.go`：数据库、Repository 和登录限流器的依赖注入
+- `backend/internal/handler/*`：HTTP 参数解析与响应
+- `backend/internal/logic/*`：输入校验、业务编排和事务边界
+- `backend/internal/repository/*`：GORM 查询、持久化、锁和聚合
+- `backend/internal/model/*`：数据库模型
 
-## 3. 鉴权
+## 3. 鉴权与错误处理
 
-- 登录：`POST /api/auth/login`，校验用户名与 bcrypt 密码哈希
-- 受保护接口：除 `/api/health`、`/api/auth/login` 外，全部需要 `Authorization: Bearer <JWT>`
-- JWT 解析强制校验签名算法为 HS256
+- `POST /api/auth/login` 使用单一运维账号和 bcrypt 哈希校验密码。
+- 用户名、密码哈希和 JWT 密钥只从 `CMS_AUTH_USERNAME`、`CMS_AUTH_PASSWORD_HASH`、`CMS_AUTH_JWT_SECRET` 读取；缺失、弱 bcrypt 哈希或不足 32 字节的 JWT 密钥会阻止服务启动。
+- 除健康检查和登录外，所有接口都要求 `Authorization: Bearer <JWT>`；JWT 只接受 HS256。
+- 同一来源 IP 连续登录失败 5 次后限制 5 分钟，成功登录会清除失败计数。
+- 预期错误返回明确的 4xx；未识别的内部错误只记录在服务日志中，对客户端统一返回通用 500，避免泄露数据库和内部实现信息。
 
-## 4. 30 天明细保留（Retention）
+## 4. 积分与历史数据
 
-- `retention.Runner` 使用 `time.Ticker` 周期触发清理
-- `retention.Cleaner` 调用 `ScoreEntryRepo.DeleteBefore` 删除早于阈值的明细
-- 多实例安全：Runner 通过 MySQL advisory lock（`GET_LOCK`）确保同一时刻只有一个实例执行清理
+- 积分明细不再自动清理。除非用户主动撤销明细，否则永久保留。
+- API 查询 `sinceDays=0` 或省略该参数时返回全部历史；网页端默认展示最近 30 天，这只是查询筛选，可改为 `0` 查看全部。
+- 新明细写入学生、组、维度和积分项名称快照。后续改名、调组或软删除学生，不会改变已记录明细的展示语义。
+- 服务升级时对已有明细执行幂等快照回填。若关联对象在升级前已被硬删除，无法恢复的旧名称会保留为空，不会伪造数据。
+- 2.0.0 的显式 MySQL 迁移脚本位于 `deploy/sql/dev-2.0.0.sql`，可在旧库或已经被 AutoMigrate 处理过的库上重复执行。
+- 删除学生采用软删除：学生不再出现在当前名单、当前总分榜和点名池中，但历史明细仍可查询和撤销。用相同学号重新创建或导入会恢复该学生；批量导入恢复时先归入未分组。
+- 已产生历史明细的维度或积分项禁止删除；积分项改换维度不会重写既有明细。
 
-相关文件：
+## 5. 计分一致性与幂等
 
-- `backend/internal/retention/runner.go`
-- `backend/internal/retention/retention.go`
-- `backend/internal/repository/lock_repo.go`
+- 单人、小组和全班计分都在一个数据库事务内完成；积分明细、学生累计分、最近积分项和幂等操作记录整体提交或整体回滚。
+- 计分时锁定相关积分项、学生及必要的小组记录，避免与编辑、删除、调组并发时产生部分成功或孤立引用。
+- `POST /api/score-entries` 支持可选 `requestId`。相同 `requestId` 和相同请求载荷重复提交时返回首次结果，不会重复加分；同一 ID 被用于不同载荷时返回 409。旧客户端省略该字段时由服务端生成 ID。
+- 主动撤销明细会同步回滚学生累计分；软删除学生仍可回滚，升级前已硬删除的学生则只删除对应明细。
 
-## 5. 学生 Excel 导入
+## 6. 学生导入
 
-- 接口：`POST /api/students/import`（multipart `file`）
-- 校验：仅 `.xlsx`，最大 10MB；校验表头 A/B 列
-- 数据写入：批量 upsert（按 `student_no` 冲突更新 name/gender/phone/position），并使用事务保证原子性
+- `POST /api/students/import` 仅接受 `.xlsx`，请求和文件最大 10MB，每次最多 500 行学生数据。
+- 校验表头、必填字段、字段长度及文件内重复学号；最多返回前 20 条行错误和剩余数量。
+- 文件中任何一行校验失败时不写入；全部通过后按学号在单个事务内 upsert。
 
-相关文件：
+## 7. 排行与点名
 
-- `backend/internal/logic/studentimportlogic.go`
-- `backend/internal/repository/student_repo.go`
+- 当前总分榜只统计未删除学生；按日期查询的历史榜保留已删除学生的历史贡献。
+- 公平点名以 MySQL 活动轮次和已点记录为事实来源，锁定轮次后选人，服务重启后可继续。
+- `(round_id, student_id)` 唯一索引防止同一公平轮次重复记录同一学生；升级迁移会先去除旧的重复点名记录再建立索引。
+
+## 8. 数据规模原则
+
+系统按最多约 100 名学生设计，排行榜和点名直接查询 MySQL。当前不引入缓存、聚合表、Redis、RBAC 或完整审计系统，避免与实际规模不匹配的复杂度。

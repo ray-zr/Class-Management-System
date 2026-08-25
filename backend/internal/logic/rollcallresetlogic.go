@@ -5,6 +5,7 @@ package logic
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"class-management-system/backend/internal/httperr"
@@ -12,6 +13,7 @@ import (
 	"class-management-system/backend/internal/types"
 
 	"github.com/zeromicro/go-zero/core/logx"
+	"gorm.io/gorm"
 )
 
 type RollcallResetLogic struct {
@@ -34,19 +36,17 @@ func (l *RollcallResetLogic) RollcallReset(req *types.RollcallResetReq) (resp *t
 		roundID = req.RoundId
 	}
 	if roundID == "" {
-		id, _, ok := l.svcCtx.RollcallState.Get()
-		if !ok {
+		activeRound, activeErr := l.svcCtx.RollcallRepo.ActiveRound(l.ctx)
+		if activeErr == nil {
+			roundID = activeRound.RoundID
+		} else if errors.Is(activeErr, gorm.ErrRecordNotFound) {
 			return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "rollcall not started"}
+		} else {
+			return nil, activeErr
 		}
-		roundID = id
-	}
-	round, err := l.svcCtx.RollcallRepo.GetRound(l.ctx, roundID)
-	if err != nil {
-		return nil, err
 	}
 	if err := l.svcCtx.RollcallRepo.Reset(l.ctx, roundID); err != nil {
 		return nil, err
 	}
-	l.svcCtx.RollcallState.Start(roundID, round.Fair)
 	return &types.Empty{}, nil
 }

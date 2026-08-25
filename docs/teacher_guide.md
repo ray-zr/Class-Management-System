@@ -8,7 +8,7 @@
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \
-  -d '{"username":"Missing","password":"2025106"}' \
+  -d '{"username":"your-admin-name","password":"your-password"}' \
   http://127.0.0.1/api/auth/login
 ```
 
@@ -34,6 +34,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1/api/students
 - 文件字段名：`file`
 - 仅支持 `.xlsx`
 - 文件大小上限：10MB
+- 每次最多 500 行学生数据
 - 第一行必须是表头：
   - A 列：`StudentNo` 或 `学号`
   - B 列：`Name` 或 `姓名`
@@ -55,7 +56,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 导入行为：
 
 - 按学号 `student_no` upsert（已存在则更新姓名/性别/电话/职位）
-- 发现任意行缺少学号或姓名会返回 400，并给出行号错误信息
+- 文件内学号不能重复；字段缺失、过长或重复会返回 400，并给出行号错误信息
+- 任意一行校验失败时整次导入不写入
+- 已软删除的学生使用相同学号导入时会恢复，并先放入未分组
 
 ## 3. 随机点名（公平模式）
 
@@ -68,10 +71,14 @@ curl -H "Authorization: Bearer $TOKEN" \
 ## 4. 积分录入
 
 - `POST /api/score-entries` 录入积分
-- `GET /api/score-entries` 查询最近 30 天明细
+- `GET /api/score-entries` 查询积分明细；省略 `sinceDays` 或传 `0` 查询全部
 - `DELETE /api/score-entries/:id` 撤销一条积分明细（会回滚该条记录对学生总分的影响）
 
-系统会在后台定时清理超过 30 天的明细，但不影响总分统计。
+积分明细不会自动清理，除非主动撤销，否则永久保留。网页端默认筛选最近 30 天，可将“最近天数”设为 `0` 查看全部。
+
+网页端会自动为每次计分生成请求 ID；网络失败后重试同一操作不会重复加分。通过 API 调用时也可传入不超过 64 字节的 `requestId` 获得相同保护。
+
+删除学生后，该学生不会出现在当前名单、当前总分榜或点名池中，但历史积分仍可查看和撤销。历史明细显示录入当时的学生、组、维度和积分项名称。
 
 ## 5. 维度与积分项（新增 / 编辑 / 删除）
 

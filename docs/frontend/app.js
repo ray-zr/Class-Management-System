@@ -60,6 +60,13 @@ function apiUrl(path, params = {}) {
   return `${API}${path}${q.toString() ? `?${q}` : ""}`;
 }
 
+function newRequestId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `score-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 function downloadWithAuth(path, params = {}, filename = "download.xlsx") {
   const token = getToken();
   if (!token) throw new Error("未登录");
@@ -110,6 +117,7 @@ const appState = {
     scope: "student",
     targetId: 0,
   },
+  pendingScoreRequest: null,
   students: { total: 0, items: [] },
   studentsQuery: { page: 1, size: 20, keyword: "", groupId: 0 },
   groups: [],
@@ -381,8 +389,8 @@ async function rollcallReset(roundId) {
 }
 
 function viewLogin() {
-  const username = el("input", { type: "text", value: "Missing" });
-  const password = el("input", { type: "password", value: "2025106" });
+  const username = el("input", { type: "text", autocomplete: "username" });
+  const password = el("input", { type: "password", autocomplete: "current-password" });
   const btn = el("button", {
     class: "btn btn-amber",
     text: "登录",
@@ -879,10 +887,11 @@ function viewScore() {
     const score = Number(it.score || 0);
     const cls = score >= 0 ? "btn btn-green" : "btn btn-red";
     const txt = `${it.name} ${score >= 0 ? "+" : ""}${score}`;
-    return el("button", {
+    const button = el("button", {
       class: cls,
       text: txt,
       onclick: async () => {
+        button.disabled = true;
         try {
           if (scopeSel.value !== "class" && targetSel.disabled) {
             throw new Error("请选择对象");
@@ -893,7 +902,13 @@ function viewScore() {
             scoreItemId: Number(it.id),
             remark: remark.value || "",
           };
+          const signature = JSON.stringify(payload);
+          if (!appState.pendingScoreRequest || appState.pendingScoreRequest.signature !== signature) {
+            appState.pendingScoreRequest = { signature, requestId: newRequestId() };
+          }
+          payload.requestId = appState.pendingScoreRequest.requestId;
           await scoreEntryCreate(payload);
+          appState.pendingScoreRequest = null;
           toast("已录入");
           await loadRecentScoreItems();
 
@@ -907,9 +922,12 @@ function viewScore() {
           render();
         } catch (e) {
           toast(String(e.message || e));
+        } finally {
+          button.disabled = false;
         }
       },
     });
+    return button;
   }
 
 
@@ -1506,8 +1524,8 @@ function viewEntries() {
   }
   groupSel.value = String(q.groupId || 0);
 
-  const sinceDays = el("input", { type: "number", min: "1", placeholder: "默认 30" });
-  sinceDays.value = String(q.sinceDays || 30);
+  const sinceDays = el("input", { type: "number", min: "0", max: "36500", placeholder: "0 表示全部" });
+  sinceDays.value = String(q.sinceDays ?? 30);
 
   const size = el("input", { type: "number", min: "1", max: "200" });
   size.value = String(q.size || 20);
@@ -1525,7 +1543,7 @@ function viewEntries() {
           size: Math.max(1, Math.min(200, Number(size.value || 20))),
           studentId: Number(stuSel.value || 0),
           groupId: Number(groupSel.value || 0),
-          sinceDays: Math.max(1, Number(sinceDays.value || 30)),
+          sinceDays: Math.max(0, Math.min(36500, Number(sinceDays.value || 0))),
         };
         await loadScoreEntries(appState.scoreEntriesQuery);
         render();
@@ -1596,14 +1614,14 @@ function viewEntries() {
       const score = Number(e.score || 0);
       const scoreCls = score >= 0 ? "score pos" : "score neg";
       const when = e.createdAt ? new Date(Number(e.createdAt) * 1000).toLocaleString() : "";
-      const itemName = item ? item.name : `积分项ID ${e.scoreItemId}`;
-      const dimName = item ? dimensionNameById(item.dimensionId) : dimensionNameById(e.dimensionId);
-      const studentName = studentNameById(e.studentId);
-      const groupName = groupNameById(e.groupId);
+      const itemName = e.scoreItemNameSnapshot || (item ? item.name : `积分项ID ${e.scoreItemId}`);
+      const dimName = e.dimensionNameSnapshot || (item ? dimensionNameById(item.dimensionId) : dimensionNameById(e.dimensionId));
+      const studentName = e.studentNameSnapshot || studentNameById(e.studentId);
+      const groupName = e.groupNameSnapshot || groupNameById(e.groupId);
       const remark = (e.remark || "").trim();
 
 
-      const canRevoke = Number(appState.scoreEntriesQuery.studentId || 0) > 0;
+      const canRevoke = true;
       const revokeBtn = canRevoke
         ? el("button", {
             class: "btn btn-small btn-danger",
@@ -1651,7 +1669,7 @@ function viewEntries() {
         el("div", { class: "field" }, [el("label", { text: "学生" }), stuSel]),
         el("div", { class: "field" }, [el("label", { text: "学生搜索" }), stuKw]),
         el("div", { class: "field" }, [el("label", { text: "小组" }), groupSel]),
-        el("div", { class: "field" }, [el("label", { text: "最近天数" }), sinceDays]),
+        el("div", { class: "field" }, [el("label", { text: "最近天数（0=全部）" }), sinceDays]),
         el("div", { class: "field" }, [el("label", { text: "每页条数" }), size]),
         query,
       ]),

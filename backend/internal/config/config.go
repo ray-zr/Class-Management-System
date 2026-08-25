@@ -13,19 +13,14 @@ type Config struct {
 	}
 
 	Auth struct {
-		Username     string
-		PasswordHash string
-		JwtSecret    string
+		Username     string `json:",optional"`
+		PasswordHash string `json:",optional"`
+		JwtSecret    string `json:",optional"`
 		JwtExpireSec int64
 	}
 
 	App struct {
 		RecentScoreItemsN int64
 		RankingTopN       int64
-	}
-
-	Retention struct {
-		ScoreEntryDays  int64
-		CleanupEverySec int64
 	}
 }

@@ -125,22 +125,29 @@ type (
 		TargetId    int64  `json:"targetId,optional"` // studentId or groupId, when applicable
 		ScoreItemId int64  `json:"scoreItemId"`
 		Remark      string `json:"remark,optional"`
+		RequestId   string `json:"requestId,optional"` // idempotency key; server generates one when omitted
 	}
 	ScoreEntryResp {
-		Id          int64  `json:"id"`
-		StudentId   int64  `json:"studentId"`
-		GroupId     int64  `json:"groupId"`
-		DimensionId int64  `json:"dimensionId"`
-		ScoreItemId int64  `json:"scoreItemId"`
-		Score       int64  `json:"score"`
-		Remark      string `json:"remark"`
-		CreatedAt   int64  `json:"createdAt"`
+		Id                    int64  `json:"id"`
+		StudentId             int64  `json:"studentId"`
+		GroupId               int64  `json:"groupId"`
+		DimensionId           int64  `json:"dimensionId"`
+		ScoreItemId           int64  `json:"scoreItemId"`
+		Score                 int64  `json:"score"`
+		Remark                string `json:"remark"`
+		RequestId             string `json:"requestId"`
+		StudentNoSnapshot     string `json:"studentNoSnapshot"`
+		StudentNameSnapshot   string `json:"studentNameSnapshot"`
+		GroupNameSnapshot     string `json:"groupNameSnapshot"`
+		DimensionNameSnapshot string `json:"dimensionNameSnapshot"`
+		ScoreItemNameSnapshot string `json:"scoreItemNameSnapshot"`
+		CreatedAt             int64  `json:"createdAt"`
 	}
 	ScoreEntryListReq {
 		PageReq
 		StudentId int64 `form:"studentId,optional" json:"studentId,optional"`
 		GroupId   int64 `form:"groupId,optional" json:"groupId,optional"`
-		SinceDays int64 `form:"sinceDays,optional" json:"sinceDays,optional"` // default 30
+		SinceDays int64 `form:"sinceDays,optional" json:"sinceDays,optional"` // 0 means all records
 	}
 	ScoreEntryListResp {
 		Total int64            `json:"total"`
@@ -183,6 +190,7 @@ type (
 	}
 	RollcallPickResp {
 		RoundId   string        `json:"roundId"`
+		Student   *StudentResp  `json:"student"` // first picked student, kept for compatibility
 		Students  []StudentResp `json:"students"`
 		Remaining int64         `json:"remaining"`
 	}
@@ -280,13 +288,13 @@ service cms-api {
 
 	// Rankings
 	@handler Ranking
-	get /rankings/students returns (RankingResp)
+	get /rankings/students (RankingReq) returns (RankingResp)
 
 	@handler GroupRanking
 	get /rankings/groups (RankingReq) returns (GroupRankingResp)
 
 	@handler RankingExport
-	get /rankings/students/export returns (Empty)
+	get /rankings/students/export (RankingReq) returns (Empty)
 
 	// Rollcall
 	@handler RollcallStart

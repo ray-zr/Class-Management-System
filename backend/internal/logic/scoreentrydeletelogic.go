@@ -15,6 +15,7 @@ import (
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ScoreEntryDeleteLogic struct {
@@ -38,19 +39,28 @@ func (l *ScoreEntryDeleteLogic) ScoreEntryDelete(id int64) (resp *types.Empty, e
 
 	if err := l.svcCtx.DB.WithContext(l.ctx).Transaction(func(tx *gorm.DB) error {
 		var e model.ScoreEntry
-		if err := tx.First(&e, id).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&e, id).Error; err != nil {
 			return err
 		}
-		res := tx.Model(&model.Student{}).
-			Where("id = ?", e.StudentID).
-			Update("total_score", gorm.Expr("total_score - ?", e.Score))
-		if res.Error != nil {
-			return res.Error
+		var student model.Student
+		studentErr := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&student, e.StudentID).Error
+		if studentErr == nil {
+			if err := tx.Unscoped().Model(&model.Student{}).
+				Where("id = ?", e.StudentID).
+				Update("total_score", gorm.Expr("total_score - ?", e.Score)).Error; err != nil {
+				return err
+			}
+		} else if !errors.Is(studentErr, gorm.ErrRecordNotFound) {
+			return studentErr
 		}
-		if res.RowsAffected == 0 {
+		result := tx.Delete(&model.ScoreEntry{}, id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
 			return gorm.ErrRecordNotFound
 		}
-		return tx.Delete(&model.ScoreEntry{}, id).Error
+		return nil
 	}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, &httperr.Error{Code: http.StatusNotFound, Msg: "not found"}

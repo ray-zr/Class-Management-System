@@ -18,10 +18,11 @@
 - MySQL 数据存储在 Docker **具名卷**：`mysql_data`。
 - 只要你没有删除该卷（例如 `docker compose down -v`），**删容器/重启机器不会丢数据**。
 
-### 默认账号
+### 登录凭据
 
-- 用户名/密码不是存在数据库里，而是在后端配置文件：`backend/etc/cms-api.docker.yaml`（Compose 以只读 volume 挂载进容器）。
-- 账号验证逻辑：用户名严格相等；密码用 **bcrypt hash** 对比。
+- 仓库没有默认账号、明文密码或可用的 JWT 密钥。
+- `CMS_AUTH_USERNAME`、`CMS_AUTH_PASSWORD_HASH`、`CMS_AUTH_JWT_SECRET` 必须由部署环境提供，缺失或不安全时后端会拒绝启动。
+- 密码只以 bcrypt 哈希参与校验，无法从哈希反查明文。
 
 ---
 
@@ -39,6 +40,13 @@
 ```bash
 git clone <your-repo-url>
 cd Class-Management-System
+
+cp .env.example .env
+go run ./tools/hash_password
+openssl rand -hex 32
+
+# 将用户名、bcrypt 输出和随机密钥填入 .env 后再启动
+docker compose config --quiet
 
 docker compose up -d --build
 docker compose ps
@@ -111,6 +119,16 @@ docker compose restart mysql
 git pull
 docker compose up -d --build
 ```
+
+从旧版本首次升级到 2.0.0 时，应在重新构建服务前执行数据库迁移：
+
+```bash
+docker compose exec -T mysql \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+  < deploy/sql/dev-2.0.0.sql
+```
+
+执行前必须先做第 6 节的逻辑备份。`dev-2.0.0.sql` 可重复执行，保留积分历史；其中只会清理同一轮次、同一学生的重复临时点名记录，以便建立唯一索引。
 
 ---
 
@@ -200,54 +218,59 @@ docker compose restart cms-api
 
 ## 4. 如何修改登录用户名与密码（最常用）
 
-账号来自配置文件：`backend/etc/cms-api.docker.yaml`（Compose 还可通过环境变量覆盖），字段：
-
-- `Auth.Username`
-- `Auth.PasswordHash`（bcrypt hash，不是明文密码）
+账号信息只从部署环境读取。Docker Compose 默认读取仓库根目录的 `.env`；该文件已被 Git 忽略，不应提交。
 
 ### 4.1 生成 bcrypt 密码哈希
 
-在服务器上执行（需要 python3）：
+在仓库根目录执行：
 
 ```bash
-python3 - <<'PY'
-import bcrypt
-
-password = b"NewStrongPassword!"  # 改成你的新密码
-hashed = bcrypt.hashpw(password, bcrypt.gensalt(rounds=10))
-print(hashed.decode())
-PY
+go run ./tools/hash_password
 ```
 
-把输出的一整串（形如 `$2b$10$...`）复制出来。
+在标准输入中输入新密码并回车。工具要求至少 12 个字符，并输出 bcrypt cost 10 的哈希。
 
-### 4.2 修改配置并重启后端
+### 4.2 更新环境文件并重建后端容器
 
-编辑 `backend/etc/cms-api.docker.yaml`：
+编辑根目录 `.env`：
 
-```yaml
-Auth:
-  Username: "Missing"
-  PasswordHash: "$2b$10$...."
-  JwtSecret: "replace-me-in-production"
-  JwtExpireSec: 86400
+```dotenv
+CMS_AUTH_USERNAME=your-new-admin-name
+CMS_AUTH_PASSWORD_HASH='$2a$10$replace-with-generated-hash'
+CMS_AUTH_JWT_SECRET=replace-with-at-least-32-random-bytes
 ```
 
-然后重启后端服务：
+bcrypt 哈希必须保留单引号，避免其中的 `$` 被 Compose 展开。校验并重建后端容器：
 
 ```bash
-docker compose restart cms-api
+docker compose config --quiet
+docker compose up -d --force-recreate cms-api
 ```
 
-### 4.3 同时建议修改 JWT 密钥
+不再接受 `CMS_AUTH_PASSWORD` 明文密码回退，也不会从 YAML 读取账号和密钥。
 
-`Auth.JwtSecret` 建议改为强随机字符串（至少 32 字符）。修改后需要重启后端：
+### 4.3 轮换 JWT 密钥
+
+生成至少 32 字节的随机密钥：
 
 ```bash
-docker compose restart cms-api
+openssl rand -hex 32
 ```
 
-> 修改 JwtSecret 会使旧 token 全部失效，属于期望行为。
+将输出写入 `.env` 的 `CMS_AUTH_JWT_SECRET`，然后重建后端容器：
+
+```bash
+docker compose up -d --force-recreate cms-api
+```
+
+> 修改 JWT 密钥会使旧 token 全部失效，用户需要重新登录。这是预期行为。
+
+### 4.4 验证
+
+```bash
+curl -i http://127.0.0.1/api/health
+docker compose logs --tail=100 cms-api
+```
 
 ---
 
@@ -316,7 +339,7 @@ cat backups/cms_xxx.sql | docker compose exec -T mysql mysql -uroot -proot
 
 1) `curl -i http://127.0.0.1/api/health` 是否 200
 2) `docker compose logs --tail=200 cms-api` 查看错误
-3) 确认配置挂载文件是否存在且格式正确：`backend/etc/cms-api.docker.yaml`
+3) 执行 `docker compose config --quiet`，并确认 `.env` 中三个 `CMS_AUTH_*` 变量均已设置
 
 ### 7.3 数据丢失怀疑
 
@@ -327,3 +350,5 @@ docker volume ls | grep mysql_data
 ```
 
 如果你执行过 `docker compose down -v`，数据卷会被删除，数据无法恢复（除非你有备份）。
+
+积分明细没有按天数自动清理机制；若记录减少，应优先核对是否发生了主动撤销、数据卷删除或数据库恢复操作。

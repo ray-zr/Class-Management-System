@@ -38,6 +38,32 @@ func (l *StudentUpdateLogic) StudentUpdate(id int64, req *types.StudentUpdateReq
 	if provided == nil {
 		provided = map[string]bool{}
 	}
+	if provided["studentNo"] && req.StudentNo == "" {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "studentNo cannot be empty"}
+	}
+	if provided["name"] && req.Name == "" {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "name cannot be empty"}
+	}
+	if provided["groupId"] && req.GroupId < 0 {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid groupId"}
+	}
+	fieldLimits := map[string]struct {
+		value string
+		max   int
+	}{
+		"studentNo": {value: req.StudentNo, max: 64},
+		"name":      {value: req.Name, max: 64},
+		"gender":    {value: req.Gender, max: 16},
+		"phone":     {value: req.Phone, max: 32},
+		"position":  {value: req.Position, max: 64},
+	}
+	for field, rule := range fieldLimits {
+		if provided[field] {
+			if err := validateText(field, rule.value, rule.max, field == "studentNo" || field == "name"); err != nil {
+				return nil, err
+			}
+		}
+	}
 	updates := map[string]any{}
 	if provided["studentNo"] {
 		updates["student_no"] = req.StudentNo

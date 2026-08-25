@@ -32,8 +32,11 @@ func (l *GroupUpdateLogic) GroupUpdate(id int64, req *types.GroupUpdateReq) (res
 	if id <= 0 {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid id"}
 	}
-	if req == nil || req.Name == "" {
+	if req == nil {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "missing name"}
+	}
+	if err := validateText("name", req.Name, 64, true); err != nil {
+		return nil, err
 	}
 	g, err := l.svcCtx.GroupRepo.UpdateName(l.ctx, id, req.Name)
 	if err != nil {
