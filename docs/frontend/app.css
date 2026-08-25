@@ -290,6 +290,52 @@ input:focus, select:focus {
   padding: 12px;
 }
 
+.stats-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.stats-section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+
+.stats-section h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.stats-list {
+  display: grid;
+  gap: 8px;
+}
+
+.stats-student {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.stats-student span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -338,4 +384,5 @@ input:focus, select:focus {
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
   input[type="text"], input[type="password"], input[type="month"], input[type="date"], input[type="number"], select { min-width: 160px; }
   .grid.cols-2 { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: 1fr; }
 }

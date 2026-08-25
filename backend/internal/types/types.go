@@ -194,10 +194,13 @@ type StudentListResp struct {
 }
 
 type StudentRankResp struct {
-	Rank      int64       `json:"rank"`
-	Highlight bool        `json:"highlight"`
-	Student   StudentResp `json:"student"`
-	Score     int64       `json:"score"`
+	Rank          int64       `json:"rank"`
+	Highlight     bool        `json:"highlight"`
+	Student       StudentResp `json:"student"`
+	Score         int64       `json:"score"`
+	AddedScore    int64       `json:"addedScore"`
+	DeductedScore int64       `json:"deductedScore"`
+	EntryCount    int64       `json:"entryCount"`
 }
 
 type StudentResp struct {

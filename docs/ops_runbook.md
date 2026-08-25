@@ -291,6 +291,16 @@ SELECT * FROM students LIMIT 20;
 SELECT * FROM score_entries ORDER BY id DESC LIMIT 50;
 ```
 
+升级后首次启动会自动核对 `students.total_score` 与 `score_entries` 汇总值。若存在旧数据差额，会新增“历史总分结转”明细以保留原总分。部署前应先完成数据库备份；启动后可用以下 SQL 抽查是否仍有不一致：
+
+```sql
+SELECT s.student_no, s.name, s.total_score, COALESCE(SUM(e.score), 0) AS entry_total
+FROM students s
+LEFT JOIN score_entries e ON e.student_id = s.id
+GROUP BY s.id
+HAVING s.total_score <> entry_total;
+```
+
 ---
 
 ## 6. 备份与恢复（强烈建议做）

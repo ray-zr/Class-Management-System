@@ -54,6 +54,9 @@ func main() {
 	if err := db.BackfillScoreEntrySnapshots(context.Background(), ctx.DB); err != nil {
 		panic(err)
 	}
+	if err := db.ReconcileStudentScoreDetails(context.Background(), ctx.DB); err != nil {
+		panic(err)
+	}
 	server.Use(middleware.RequireAuth(map[string]struct{}{
 		"/api/health":     {},
 		"/api/auth/login": {},

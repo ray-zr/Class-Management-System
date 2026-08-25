@@ -90,8 +90,11 @@ func rankRows(rows []repository.StudentScoreRow, topN int64) *types.RankingResp 
 			}
 		}
 		items = append(items, types.StudentRankResp{
-			Rank:      rank,
-			Highlight: highlight,
+			Rank:          rank,
+			Highlight:     highlight,
+			AddedScore:    row.AddedScore,
+			DeductedScore: row.DeductedScore,
+			EntryCount:    row.EntryCount,
 			Student: types.StudentResp{
 				Id:         row.StudentID,
 				StudentNo:  row.StudentNo,

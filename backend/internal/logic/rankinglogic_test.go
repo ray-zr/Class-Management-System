@@ -25,3 +25,22 @@ func TestRankRowsUsesDenseRanksAndIncludesTies(t *testing.T) {
 		}
 	}
 }
+
+func TestRankRowsIncludesScoreBreakdown(t *testing.T) {
+	resp := rankRows([]repository.StudentScoreRow{{
+		StudentID:     1,
+		StudentNo:     "01",
+		Name:          "测试学生",
+		Score:         2,
+		AddedScore:    5,
+		DeductedScore: -3,
+		EntryCount:    4,
+	}}, 5)
+	if len(resp.Items) != 1 {
+		t.Fatalf("rankRows() item count = %d, want 1", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if item.AddedScore != 5 || item.DeductedScore != -3 || item.EntryCount != 4 {
+		t.Fatalf("rankRows() breakdown = (%d, %d, %d)", item.AddedScore, item.DeductedScore, item.EntryCount)
+	}
+}

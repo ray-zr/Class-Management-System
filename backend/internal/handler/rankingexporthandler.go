@@ -29,9 +29,9 @@ func RankingExportHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-		filename := "总分积分排名汇总表.xlsx"
+		filename := "班级量化汇总及细则-全部历史.xlsx"
 		if !req.Total {
-			filename = "积分排名汇总表.xlsx"
+			filename = "班级量化汇总及细则.xlsx"
 		}
 		w.Header().Set("Content-Disposition", contentDisposition(filename))
 		w.WriteHeader(http.StatusOK)
@@ -40,7 +40,7 @@ func RankingExportHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 }
 
 func contentDisposition(filename string) string {
-	fallback := "ranking.xlsx"
+	fallback := "class-score-summary.xlsx"
 	q := url.QueryEscape(filename)
 	q = strings.ReplaceAll(q, "+", "%20")
 	return fmt.Sprintf("attachment; filename=\"%s\"; filename*=UTF-8''%s", fallback, q)

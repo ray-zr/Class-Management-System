@@ -14,8 +14,11 @@ type RankingRepo struct{ db *gorm.DB }
 func NewRankingRepo(db *gorm.DB) *RankingRepo { return &RankingRepo{db: db} }
 
 type StudentScoreRow struct {
-	StudentID int64 `gorm:"column:student_id"`
-	Score     int64 `gorm:"column:score"`
+	StudentID     int64 `gorm:"column:student_id"`
+	Score         int64 `gorm:"column:score"`
+	AddedScore    int64 `gorm:"column:added_score"`
+	DeductedScore int64 `gorm:"column:deducted_score"`
+	EntryCount    int64 `gorm:"column:entry_count"`
 
 	StudentNo  string `gorm:"column:student_no"`
 	Name       string `gorm:"column:name"`
@@ -51,9 +54,12 @@ func (r *RankingRepo) StudentTotals(ctx context.Context, monthStart time.Time, m
 	}
 
 	selectSQL := fmt.Sprintf(
-		"%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
+		"%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
 		"s.id as student_id",
 		"coalesce(sum(e.score), 0) as score",
+		"coalesce(sum(case when e.score > 0 then e.score else 0 end), 0) as added_score",
+		"coalesce(sum(case when e.score < 0 then e.score else 0 end), 0) as deducted_score",
+		"count(e.id) as entry_count",
 		"s.student_no as student_no",
 		"s.name as name",
 		"s.gender as gender",
@@ -82,9 +88,12 @@ func (r *RankingRepo) StudentTotals(ctx context.Context, monthStart time.Time, m
 
 func (r *RankingRepo) StudentTotalScoreRanking(ctx context.Context) ([]StudentScoreRow, error) {
 	selectSQL := fmt.Sprintf(
-		"%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
+		"%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
 		"s.id as student_id",
 		"s.total_score as score",
+		"coalesce(es.added_score, 0) as added_score",
+		"coalesce(es.deducted_score, 0) as deducted_score",
+		"coalesce(es.entry_count, 0) as entry_count",
 		"s.student_no as student_no",
 		"s.name as name",
 		"s.gender as gender",
@@ -100,6 +109,14 @@ func (r *RankingRepo) StudentTotalScoreRanking(ctx context.Context) ([]StudentSc
 	q := r.db.WithContext(ctx).
 		Table("students s").
 		Joins("LEFT JOIN `groups` g ON g.id = s.group_id").
+		Joins(`LEFT JOIN (
+			SELECT student_id,
+			       SUM(CASE WHEN score > 0 THEN score ELSE 0 END) AS added_score,
+			       SUM(CASE WHEN score < 0 THEN score ELSE 0 END) AS deducted_score,
+			       COUNT(id) AS entry_count
+			FROM score_entries
+			GROUP BY student_id
+		) es ON es.student_id = s.id`).
 		Where("s.deleted_at IS NULL").
 		Select(selectSQL).
 		Order("score desc, s.id asc")

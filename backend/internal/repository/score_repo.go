@@ -270,3 +270,24 @@ func (r *ScoreEntryRepo) List(ctx context.Context, f ScoreEntryListFilter) (tota
 	}
 	return total, res, nil
 }
+
+func (r *ScoreEntryRepo) ListCurrentStudentsForExport(ctx context.Context, start, end time.Time, dimensionID int64) ([]model.ScoreEntry, error) {
+	q := r.db.WithContext(ctx).
+		Table("score_entries e").
+		Select("e.*").
+		Joins("JOIN students s ON s.id = e.student_id AND s.deleted_at IS NULL")
+	if !start.IsZero() {
+		q = q.Where("e.created_at >= ?", start)
+	}
+	if !end.IsZero() {
+		q = q.Where("e.created_at < ?", end)
+	}
+	if dimensionID != 0 {
+		q = q.Where("e.dimension_id = ?", dimensionID)
+	}
+	var entries []model.ScoreEntry
+	if err := q.Order("e.id asc").Find(&entries).Error; err != nil {
+		return nil, err
+	}
+	return entries, nil
+}

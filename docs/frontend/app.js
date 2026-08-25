@@ -129,6 +129,7 @@ const appState = {
   rankingsType: "students",
   rankings: [],
   groupRankings: [],
+  dimensionStats: { dimensionId: 0, startDate: "", endDate: "", items: [] },
   scoreEntries: { total: 0, items: [] },
   scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
   scoreEntriesStudentKeyword: "",
@@ -255,14 +256,22 @@ async function loadRecentScoreItems() {
   appState.recentScoreItems = res.items || [];
 }
 
-async function loadRankings(params = {}) {
+async function fetchRankings(params = {}) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "" || Number.isNaN(v)) continue;
     q.set(k, String(v));
   }
   const res = await apiFetch(`/rankings/students${q.toString() ? `?${q}` : ""}`);
-  appState.rankings = res.items || [];
+  return res.items || [];
+}
+
+async function loadRankings(params = {}) {
+  appState.rankings = await fetchRankings(params);
+}
+
+async function loadDimensionStats(params) {
+  appState.dimensionStats = { ...appState.dimensionStats, ...params, items: await fetchRankings(params) };
 }
 
 async function loadGroupRankings(params = {}) {
@@ -452,7 +461,7 @@ function shell(title, content) {
       await Promise.all([loadStudentsForPickers(), loadGroups()]);
     }
     if (routeKey === "config") {
-      await Promise.all([loadDimensions(), loadScoreItems()]);
+      await Promise.all([loadStudentsForPickers(), loadDimensions(), loadScoreItems()]);
     }
     if (routeKey === "entries") {
       await Promise.all([
@@ -1310,15 +1319,96 @@ function viewConfig() {
           }
         },
       });
+      const stats = el("button", {
+        class: "btn btn-small",
+        text: "统计",
+        onclick: async () => {
+          try {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), now.getMonth(), 1);
+            const params = {
+              dimensionId: Number(d.id),
+              startDate: appState.dimensionStats.startDate || `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-01`,
+              endDate: appState.dimensionStats.endDate || `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`,
+            };
+            await loadDimensionStats(params);
+            render();
+          } catch (e) {
+            toast(String(e.message || e));
+          }
+        },
+      });
       return el("div", { class: "row entry-item" }, [
         el("div", { class: "row", style: "flex:1" }, [
           el("div", { class: "field" }, [el("label", { text: "维度名称" }), edit]),
         ]),
+        stats,
         save,
         del,
       ]);
     })
   );
+
+  const selectedStatsDimension = (appState.dimensions || []).find(
+    (d) => Number(d.id) === Number(appState.dimensionStats.dimensionId)
+  );
+  let statsCard = null;
+  if (selectedStatsDimension) {
+    const statsStart = el("input", { type: "date", value: appState.dimensionStats.startDate });
+    const statsEnd = el("input", { type: "date", value: appState.dimensionStats.endDate });
+    const statsQuery = el("button", {
+      class: "btn btn-amber",
+      text: "查询统计",
+      onclick: async () => {
+        try {
+          await loadDimensionStats({
+            dimensionId: Number(selectedStatsDimension.id),
+            startDate: statsStart.value,
+            endDate: statsEnd.value,
+          });
+          render();
+        } catch (e) {
+          toast(String(e.message || e));
+        }
+      },
+    });
+    const activeStudentIds = new Set((appState.students.items || []).map((student) => Number(student.id)));
+    const items = (appState.dimensionStats.items || []).filter((item) => activeStudentIds.has(Number(item.student.id)));
+    const added = items.filter((item) => Number(item.addedScore || 0) > 0);
+    const deducted = items.filter((item) => Number(item.deductedScore || 0) < 0);
+    const unchanged = items.filter((item) => Number(item.entryCount || 0) === 0);
+    const statsList = (list, field, emptyText) =>
+      el(
+        "div",
+        { class: "stats-list" },
+        list.length
+          ? list.map((item) => {
+              const score = Number(item[field] || 0);
+              return el("div", { class: "stats-student" }, [
+                el("span", { text: `${item.student.studentNo} ${item.student.name}` }),
+                field === "entryCount"
+                  ? el("span", { class: "muted", text: "无记录" })
+                  : el("strong", { class: score > 0 ? "score pos" : "score neg", text: `${score > 0 ? "+" : ""}${score}` }),
+              ]);
+            })
+          : [el("div", { class: "muted", text: emptyText })]
+      );
+    statsCard = el("div", { class: "card" }, [
+      el("div", { class: "stats-heading" }, [
+        el("h2", { text: `${selectedStatsDimension.name}统计` }),
+        el("div", { class: "row" }, [
+          el("div", { class: "field" }, [el("label", { text: "开始日期" }), statsStart]),
+          el("div", { class: "field" }, [el("label", { text: "结束日期" }), statsEnd]),
+          statsQuery,
+        ]),
+      ]),
+      el("div", { class: "stats-grid" }, [
+        el("section", { class: "stats-section" }, [el("h3", { text: `有加分（${added.length}）` }), statsList(added, "addedScore", "该时段没有加分记录")]),
+        el("section", { class: "stats-section" }, [el("h3", { text: `有减分（${deducted.length}）` }), statsList(deducted, "deductedScore", "该时段没有减分记录")]),
+        el("section", { class: "stats-section" }, [el("h3", { text: `无加减分（${unchanged.length}）` }), statsList(unchanged, "entryCount", "全班学生均有记录")]),
+      ]),
+    ]);
+  }
 
   const siDim = el("select");
   for (const d of appState.dimensions || []) {
@@ -1440,6 +1530,7 @@ function viewConfig() {
       el("div", { class: "sep" }),
       dimList,
     ]),
+    statsCard,
     el("div", { class: "card" }, [
       el("h2", { text: "新增积分项" }),
       el("div", { class: "row" }, [
@@ -1602,7 +1693,7 @@ function viewEntries() {
     : null;
   const selectedTotal = selectedStudent ? Number(selectedStudent.totalScore || 0) : 0;
   const currentTotalPill = selectedStudent
-    ? el("span", { class: "pill" }, [el("span", { text: `当前总分 ${selectedTotal}` })])
+    ? el("span", { class: "pill" }, [el("span", { text: `当前总分（全部明细）${selectedTotal}` })])
     : null;
 
 
@@ -1742,7 +1833,7 @@ function viewRankings() {
 
   const exportBtn = el("button", {
     class: "btn",
-    text: "导出 Excel",
+    text: "导出量化汇总及细则",
     onclick: () => {
       try {
         if (typeSel.value === "groups") {
@@ -1758,7 +1849,7 @@ function viewRankings() {
             dimensionId: dim.value ? Number(dim.value) : "",
             topN: topN.value ? Number(topN.value) : "",
           },
-          total.checked ? "总分积分排名汇总表.xlsx" : "积分排名汇总表.xlsx"
+          total.checked ? "班级量化汇总及细则-全部历史.xlsx" : "班级量化汇总及细则.xlsx"
         );
       } catch (e) {
         toast(String(e.message || e));
@@ -2053,7 +2144,7 @@ async function ensureDataForRoute() {
     await Promise.all([loadStudentsForPickers(), loadGroups()]);
   }
   if (appState.route === "config") {
-    await Promise.all([loadDimensions(), loadScoreItems()]);
+    await Promise.all([loadStudentsForPickers(), loadDimensions(), loadScoreItems()]);
   }
   if (appState.route === "entries") {
     await Promise.all([

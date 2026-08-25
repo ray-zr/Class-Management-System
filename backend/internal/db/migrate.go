@@ -2,10 +2,17 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"class-management-system/backend/internal/model"
 
 	"gorm.io/gorm"
+)
+
+const (
+	historyDimensionName = "历史数据校准"
+	historyScoreItemName = "历史总分结转"
 )
 
 func PrepareCompatibilityMigrations(ctx context.Context, gdb *gorm.DB) error {
@@ -55,4 +62,68 @@ func BackfillScoreEntrySnapshots(ctx context.Context, gdb *gorm.DB) error {
 		   OR e.dimension_name_snapshot = ''
 		   OR e.score_item_name_snapshot = ''
 	`).Error
+}
+
+type scoreDifferenceRow struct {
+	StudentID   int64  `gorm:"column:student_id"`
+	GroupID     int64  `gorm:"column:group_id"`
+	StudentNo   string `gorm:"column:student_no"`
+	StudentName string `gorm:"column:student_name"`
+	GroupName   string `gorm:"column:group_name"`
+	Difference  int64  `gorm:"column:difference"`
+}
+
+// ReconcileStudentScoreDetails preserves legacy totals by recording any
+// difference as an explicit historical carry-forward entry.
+func ReconcileStudentScoreDetails(ctx context.Context, gdb *gorm.DB) error {
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []scoreDifferenceRow
+		if err := tx.Table("students s").
+			Joins("LEFT JOIN `groups` g ON g.id = s.group_id").
+			Joins("LEFT JOIN (SELECT student_id, SUM(score) AS entry_total FROM score_entries GROUP BY student_id) totals ON totals.student_id = s.id").
+			Select(`s.id AS student_id,
+				s.group_id AS group_id,
+				s.student_no AS student_no,
+				s.name AS student_name,
+				COALESCE(g.name, '') AS group_name,
+				s.total_score - COALESCE(totals.entry_total, 0) AS difference`).
+			Where("s.total_score <> COALESCE(totals.entry_total, 0)").
+			Scan(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+
+		dimension := model.Dimension{Name: historyDimensionName}
+		if err := tx.Where("name = ?", historyDimensionName).FirstOrCreate(&dimension).Error; err != nil {
+			return err
+		}
+		item := model.ScoreItem{DimensionID: dimension.ID, Name: historyScoreItemName, Score: 1}
+		if err := tx.Where("dimension_id = ? AND name = ?", dimension.ID, historyScoreItemName).FirstOrCreate(&item).Error; err != nil {
+			return err
+		}
+
+		now := time.Now()
+		for _, row := range rows {
+			entry := model.ScoreEntry{
+				StudentID:             row.StudentID,
+				GroupID:               row.GroupID,
+				DimensionID:           dimension.ID,
+				ScoreItemID:           item.ID,
+				Score:                 row.Difference,
+				Remark:                "系统升级时按原总分与现有积分明细的差额自动结转",
+				RequestID:             fmt.Sprintf("legacy-balance-%d-%d", row.StudentID, now.UnixNano()),
+				StudentNoSnapshot:     row.StudentNo,
+				StudentNameSnapshot:   row.StudentName,
+				GroupNameSnapshot:     row.GroupName,
+				DimensionNameSnapshot: historyDimensionName,
+				ScoreItemNameSnapshot: historyScoreItemName,
+			}
+			if err := tx.Create(&entry).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
