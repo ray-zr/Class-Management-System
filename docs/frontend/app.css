@@ -349,7 +349,7 @@ textarea:focus-visible {
 
 .score-settings-grid {
   display: grid;
-  grid-template-columns: minmax(120px, 0.65fr) minmax(190px, 1.1fr) minmax(190px, 1.1fr) minmax(220px, 1.35fr);
+  grid-template-columns: minmax(120px, 0.65fr) minmax(220px, 1.2fr) minmax(220px, 1.35fr);
   align-items: end;
   gap: 12px;
 }
@@ -841,6 +841,51 @@ input[type="checkbox"] {
   background: rgba(29, 29, 31, 0.28);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+.score-confirm-dialog .dialog-eyebrow {
+  color: var(--blue);
+}
+
+.score-confirm-summary {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-secondary);
+}
+
+.score-confirm-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 12px;
+}
+
+.score-confirm-row + .score-confirm-row {
+  border-top: 1px solid var(--line);
+}
+
+.score-confirm-row > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.score-confirm-row > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.score-confirm-value-row > strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-help {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .revoke-form {

@@ -389,6 +389,91 @@ async function scoreEntryCreate(payload) {
   });
 }
 
+function requestScoreEntryConfirmation({ targetName, item, dimensionName }) {
+  return new Promise((resolve) => {
+    const score = Number(item.score || 0);
+    const remark = el("textarea", {
+      rows: "3",
+      maxlength: "255",
+      placeholder: "可填写本次加减分的具体情况",
+    });
+    const dialog = el("dialog", {
+      class: "revoke-dialog score-confirm-dialog",
+      "aria-labelledby": "score-confirm-dialog-title",
+    });
+    let settled = false;
+
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+
+    const form = el("form", {
+      class: "revoke-form",
+      onsubmit: (event) => {
+        event.preventDefault();
+        finish({ remark: remark.value.trim() });
+      },
+    }, [
+      el("div", { class: "dialog-heading" }, [
+        el("div", {}, [
+          el("p", { class: "dialog-eyebrow", text: score >= 0 ? "加分确认" : "扣分确认" }),
+          el("h2", { id: "score-confirm-dialog-title", text: "确认积分录入" }),
+        ]),
+        el("button", {
+          class: "icon-button",
+          type: "button",
+          text: "×",
+          title: "关闭",
+          "aria-label": "关闭",
+          onclick: () => finish(null),
+        }),
+      ]),
+      el("div", { class: "score-confirm-summary" }, [
+        el("div", { class: "score-confirm-row" }, [
+          el("span", { text: "录入对象" }),
+          el("strong", { text: targetName }),
+        ]),
+        el("div", { class: "score-confirm-row" }, [
+          el("span", { text: "积分项目" }),
+          el("strong", { text: item.name }),
+        ]),
+        el("div", { class: "score-confirm-row" }, [
+          el("span", { text: "所属维度" }),
+          el("strong", { text: dimensionName }),
+        ]),
+        el("div", { class: "score-confirm-row score-confirm-value-row" }, [
+          el("span", { text: "本次分值" }),
+          el("strong", {
+            class: score >= 0 ? "score pos" : "score neg",
+            text: `${score >= 0 ? "+" : ""}${score}`,
+          }),
+        ]),
+      ]),
+      el("div", { class: "field" }, [
+        el("label", { for: "score-entry-remark", text: "备注（可选）" }),
+        remark,
+        el("span", { class: "field-help", text: "备注将随本次操作显示在积分记录日志中" }),
+      ]),
+      el("div", { class: "dialog-actions" }, [
+        el("button", { class: "btn", type: "button", text: "取消", onclick: () => finish(null) }),
+        el("button", { class: "btn btn-amber", type: "submit", text: "确认录入" }),
+      ]),
+    ]);
+    remark.id = "score-entry-remark";
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(null);
+    });
+    dialog.appendChild(form);
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  });
+}
+
 async function scoreEntryDelete(id, reason) {
   await apiFetch(`/score-entries/${id}`, {
     method: "DELETE",
@@ -932,7 +1017,6 @@ function viewScore() {
   const targetSel = el("select");
   const targetKw = el("input", { type: "text", placeholder: "搜索（学号/姓名）" });
   targetKw.value = String(appState.scoreTargetKeyword || "");
-  const remark = el("input", { type: "text", placeholder: "备注（可选）" });
 
 
   const filterDim = el("select");
@@ -1034,15 +1118,24 @@ function viewScore() {
       onclick: async () => {
         button.disabled = true;
         try {
-          if (scopeSel.value !== "class" && targetSel.disabled) {
+          if (scopeSel.value !== "class" && (targetSel.disabled || !targetSel.value)) {
             throw new Error("请选择对象");
           }
           const payload = {
             scope: scopeSel.value,
             targetId: scopeSel.value === "class" ? 0 : Number(targetSel.value || 0),
             scoreItemId: Number(it.id),
-            remark: remark.value || "",
           };
+          const targetName = scopeSel.value === "class"
+            ? "全班"
+            : targetSel.options[targetSel.selectedIndex]?.text || "未选择对象";
+          const confirmation = await requestScoreEntryConfirmation({
+            targetName,
+            item: it,
+            dimensionName: dimensionNameById(it.dimensionId),
+          });
+          if (!confirmation) return;
+          payload.remark = confirmation.remark;
           const signature = JSON.stringify(payload);
           if (!appState.pendingScoreRequest || appState.pendingScoreRequest.signature !== signature) {
             appState.pendingScoreRequest = { signature, requestId: newRequestId() };
@@ -1161,14 +1254,13 @@ function viewScore() {
         el("div", { class: "field" }, [el("label", { text: "范围" }), scopeSel]),
         el("div", { class: "field" }, [el("label", { text: "对象" }), targetSel]),
         el("div", { class: "field" }, [el("label", { text: "对象搜索" }), targetKw]),
-        el("div", { class: "field" }, [el("label", { text: "备注" }), remark]),
       ]),
       el("div", { class: "row score-setting-status" }, [draftInfo, currentScore]),
     ]),
     el("section", { class: "card score-catalog" }, [
       el("div", { class: "section-heading" }, [
         el("h2", { text: "选择积分项" }),
-        el("span", { class: "muted", text: "点击后立即完成积分录入" }),
+        el("span", { class: "muted", text: "点击积分项后核对信息并确认录入" }),
       ]),
       el("div", { class: "score-toolbar" }, [
         el("div", { class: "field" }, [el("label", { text: "维度筛选" }), filterDim]),
