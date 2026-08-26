@@ -111,6 +111,24 @@ textarea:focus-visible {
 
 .nav {
   display: grid;
+  gap: 15px;
+}
+
+.nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-group-label {
+  margin: 0;
+  padding: 0 12px;
+  color: #8e8e93;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nav-group-items {
+  display: grid;
   gap: 3px;
 }
 
@@ -193,18 +211,6 @@ textarea:focus-visible {
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-}
-
-.btn-utility {
-  border: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.btn-utility:hover,
-.btn-utility.active {
-  border-color: rgba(0, 122, 255, 0.28);
-  color: var(--blue);
-  background: rgba(0, 122, 255, 0.08);
 }
 
 .pill {
@@ -339,6 +345,137 @@ textarea:focus-visible {
   font-size: 16px;
   font-weight: 650;
   line-height: 1.3;
+}
+
+.score-settings-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.65fr) minmax(190px, 1.1fr) minmax(190px, 1.1fr) minmax(220px, 1.35fr);
+  align-items: end;
+  gap: 12px;
+}
+
+.score-settings-grid input,
+.score-settings-grid select,
+.score-toolbar input,
+.score-toolbar select {
+  width: 100%;
+  min-width: 0;
+}
+
+.score-setting-status {
+  min-height: 30px;
+  margin-top: 14px;
+}
+
+.score-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(240px, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.score-item-section + .score-item-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.score-item-section > h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.score-pair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.score-lane {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-top-width: 3px;
+  border-radius: 8px;
+  background: #fafafc;
+}
+
+.score-lane.add {
+  border-top-color: rgba(36, 138, 61, 0.58);
+}
+
+.score-lane.deduct {
+  border-top-color: rgba(215, 0, 21, 0.5);
+}
+
+.score-lane-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.score-lane-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.score-lane.add .score-lane-header h4 {
+  color: var(--green);
+}
+
+.score-lane.deduct .score-lane-header h4 {
+  color: var(--red);
+}
+
+.score-lane-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-item-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: stretch;
+  gap: 8px;
+}
+
+.score-item-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.score-item-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.score-item-value {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-lane-empty {
+  grid-column: 1 / -1;
+  min-height: 46px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  text-align: center;
 }
 
 .row {
@@ -1081,6 +1218,27 @@ input[type="checkbox"] {
     scroll-snap-type: x proximity;
   }
 
+  .nav-group {
+    display: block;
+    flex: 0 0 auto;
+    padding-right: 6px;
+    border-right: 1px solid var(--line);
+  }
+
+  .nav-group:last-child {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-group-items {
+    display: flex;
+    gap: 6px;
+  }
+
   .nav button {
     flex: 0 0 auto;
     width: auto;
@@ -1115,6 +1273,10 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
+  .score-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   input[type="text"],
   input[type="password"],
   input[type="month"],
@@ -1122,6 +1284,13 @@ input[type="checkbox"] {
   input[type="number"],
   select {
     min-width: 160px;
+  }
+}
+
+@media (max-width: 760px) {
+  .score-pair-grid,
+  .score-toolbar {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1154,6 +1323,19 @@ input[type="checkbox"] {
 
   .card {
     padding: 16px;
+  }
+
+  .score-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .score-catalog .section-heading {
+    display: block;
+  }
+
+  .score-catalog .section-heading .muted {
+    display: block;
+    margin-top: 4px;
   }
 
   .row > .field {

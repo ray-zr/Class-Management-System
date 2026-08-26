@@ -130,6 +130,7 @@ const appState = {
   scoreItems: [],
   recentScoreItems: [],
   scoreItemFilterDimensionId: 0,
+  scoreItemKeyword: "",
   scoreTargetKeyword: "",
   rankingsType: "students",
   rankings: [],
@@ -551,14 +552,30 @@ function viewLogin() {
 }
 
 function shell(title, content) {
-  const navItems = [
-    { key: "students", label: "学生名单" },
-    { key: "score", label: "积分录入" },
-    { key: "rollcall", label: "随机点名" },
-    { key: "groups", label: "小组管理" },
-    { key: "config", label: "维度与积分项" },
-    { key: "rankings", label: "排行榜" },
-    { key: "timer", label: "计时器" },
+  const navGroups = [
+    {
+      label: "班级管理",
+      items: [
+        { key: "students", label: "学生管理" },
+        { key: "groups", label: "小组管理" },
+      ],
+    },
+    {
+      label: "积分管理",
+      items: [
+        { key: "score", label: "积分录入" },
+        { key: "logs", label: "积分记录日志" },
+        { key: "rankings", label: "积分排行榜" },
+        { key: "config", label: "积分规则" },
+      ],
+    },
+    {
+      label: "课堂工具",
+      items: [
+        { key: "rollcall", label: "随机点名" },
+        { key: "timer", label: "课堂计时" },
+      ],
+    },
   ];
 
   async function loadForRoute(routeKey) {
@@ -589,20 +606,26 @@ function shell(title, content) {
     }
   }
 
-  const nav = el("div", { class: "nav" }, navItems.map((it) =>
-    el("button", {
-      class: it.key === appState.route ? "active" : "",
-      text: it.label,
-      onclick: async () => {
-        appState.route = it.key;
-        try {
-          await loadForRoute(it.key);
-        } catch (e) {
-          toast(String(e.message || e));
-        }
-        render();
-      },
-    })
+  const nav = el("nav", { class: "nav", "aria-label": "主导航" }, navGroups.map((group) =>
+    el("div", { class: "nav-group" }, [
+      el("p", { class: "nav-group-label", text: group.label }),
+      el("div", { class: "nav-group-items" }, group.items.map((it) =>
+        el("button", {
+          class: it.key === appState.route ? "active" : "",
+          text: it.label,
+          "aria-current": it.key === appState.route ? "page" : null,
+          onclick: async () => {
+            appState.route = it.key;
+            try {
+              await loadForRoute(it.key);
+            } catch (e) {
+              toast(String(e.message || e));
+            }
+            render();
+          },
+        })
+      )),
+    ])
   ));
 
   const logout = el("button", {
@@ -611,21 +634,6 @@ function shell(title, content) {
     onclick: () => {
       setToken("");
       appState.route = "login";
-      render();
-    },
-  });
-
-  const operationLogs = el("button", {
-    class: appState.route === "logs" ? "btn btn-utility active" : "btn btn-utility",
-    text: "操作日志",
-    "aria-current": appState.route === "logs" ? "page" : null,
-    onclick: async () => {
-      appState.route = "logs";
-      try {
-        await loadForRoute("logs");
-      } catch (e) {
-        toast(String(e.message || e));
-      }
       render();
     },
   });
@@ -641,7 +649,7 @@ function shell(title, content) {
     el("main", { class: "main" }, [
       el("div", { class: "topbar" }, [
         el("h2", { class: "title", text: title }),
-        el("div", { class: "topbar-tools" }, [operationLogs, logout]),
+        el("div", { class: "topbar-tools" }, [logout]),
       ]),
       content,
     ]),
@@ -933,6 +941,8 @@ function viewScore() {
     filterDim.appendChild(el("option", { value: String(d.id), text: d.name }));
   }
   filterDim.value = String(appState.scoreItemFilterDimensionId || 0);
+  const itemKw = el("input", { type: "text", placeholder: "搜索积分项名称或维度" });
+  itemKw.value = String(appState.scoreItemKeyword || "");
 
   function tokenizeKw(v) {
     const s = String(v || "").trim().toLowerCase();
@@ -1018,11 +1028,9 @@ function viewScore() {
 
   function itemBtn(it) {
     const score = Number(it.score || 0);
-    const cls = score >= 0 ? "btn btn-green" : "btn btn-red";
-    const txt = `${it.name} ${score >= 0 ? "+" : ""}${score}`;
+    const cls = score >= 0 ? "btn btn-green score-item-button" : "btn btn-red score-item-button";
     const button = el("button", {
       class: cls,
-      text: txt,
       onclick: async () => {
         button.disabled = true;
         try {
@@ -1059,38 +1067,73 @@ function viewScore() {
           button.disabled = false;
         }
       },
-    });
+    }, [
+      el("span", { class: "score-item-name", text: it.name }),
+      el("span", { class: "score-item-value", text: `${score >= 0 ? "+" : ""}${score}` }),
+    ]);
     return button;
   }
 
+  const recentPlus = el("div", { class: "score-item-list" });
+  const recentMinus = el("div", { class: "score-item-list" });
+  const allPlus = el("div", { class: "score-item-list" });
+  const allMinus = el("div", { class: "score-item-list" });
+  const recentPlusCount = el("span", { class: "score-lane-count" });
+  const recentMinusCount = el("span", { class: "score-lane-count" });
+  const allPlusCount = el("span", { class: "score-lane-count" });
+  const allMinusCount = el("span", { class: "score-lane-count" });
 
-  const recentPlus = el("div", { class: "row" });
-  const recentMinus = el("div", { class: "row" });
-  const allPlus = el("div", { class: "row" });
-  const allMinus = el("div", { class: "row" });
+  function scoreLane(title, tone, count, items) {
+    return el("section", { class: `score-lane ${tone}` }, [
+      el("div", { class: "score-lane-header" }, [
+        el("h4", { text: title }),
+        count,
+      ]),
+      items,
+    ]);
+  }
+
+  function renderItemGroup(container, items, emptyText) {
+    container.innerHTML = "";
+    if (!items.length) {
+      container.appendChild(el("div", { class: "score-lane-empty", text: emptyText }));
+      return;
+    }
+    for (const it of items) container.appendChild(itemBtn(it));
+  }
 
   function renderItems() {
     const dimId = Number(filterDim.value || 0);
-    const recentItems = (appState.recentScoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
-    const allItems = (appState.scoreItems || []).filter((x) => (dimId ? Number(x.dimensionId) === dimId : true));
+    const keywordTokens = tokenizeKw(itemKw.value);
+    const matches = (it) => {
+      if (dimId && Number(it.dimensionId) !== dimId) return false;
+      const dimensionName = dimensionNameById(it.dimensionId);
+      return matchAllTokens(`${it.name || ""} ${dimensionName}`, keywordTokens);
+    };
+    const recentItems = (appState.recentScoreItems || []).filter(matches);
+    const allItems = (appState.scoreItems || []).filter(matches);
+    const recentAdds = recentItems.filter((it) => Number(it.score || 0) >= 0);
+    const recentDeducts = recentItems.filter((it) => Number(it.score || 0) < 0);
+    const allAdds = allItems.filter((it) => Number(it.score || 0) >= 0);
+    const allDeducts = allItems.filter((it) => Number(it.score || 0) < 0);
 
-    recentPlus.innerHTML = "";
-    recentMinus.innerHTML = "";
-    allPlus.innerHTML = "";
-    allMinus.innerHTML = "";
-
-    for (const it of recentItems) {
-      const score = Number(it.score || 0);
-      (score >= 0 ? recentPlus : recentMinus).appendChild(itemBtn(it));
-    }
-    for (const it of allItems) {
-      const score = Number(it.score || 0);
-      (score >= 0 ? allPlus : allMinus).appendChild(itemBtn(it));
-    }
+    recentPlusCount.textContent = `${recentAdds.length} 项`;
+    recentMinusCount.textContent = `${recentDeducts.length} 项`;
+    allPlusCount.textContent = `${allAdds.length} 项`;
+    allMinusCount.textContent = `${allDeducts.length} 项`;
+    const hasFilter = Boolean(dimId || keywordTokens.length);
+    renderItemGroup(recentPlus, recentAdds, hasFilter ? "没有匹配的最近加分项" : "暂无最近使用的加分项");
+    renderItemGroup(recentMinus, recentDeducts, hasFilter ? "没有匹配的最近扣分项" : "暂无最近使用的扣分项");
+    renderItemGroup(allPlus, allAdds, hasFilter ? "没有匹配的加分项" : "暂无加分项");
+    renderItemGroup(allMinus, allDeducts, hasFilter ? "没有匹配的扣分项" : "暂无扣分项");
   }
 
   filterDim.addEventListener("change", () => {
     appState.scoreItemFilterDimensionId = Number(filterDim.value || 0);
+    renderItems();
+  });
+  itemKw.addEventListener("input", () => {
+    appState.scoreItemKeyword = itemKw.value || "";
     renderItems();
   });
 
@@ -1111,31 +1154,39 @@ function viewScore() {
       ])
     : null;
 
-  const content = el("div", { class: "grid cols-2" }, [
-    el("div", { class: "card" }, [
-      el("h2", { text: "录入设置" }),
-      el("div", { class: "row" }, [
+  const content = el("div", { class: "grid score-entry-page" }, [
+    el("section", { class: "card score-settings" }, [
+      el("h2", { text: "录入对象" }),
+      el("div", { class: "score-settings-grid" }, [
         el("div", { class: "field" }, [el("label", { text: "范围" }), scopeSel]),
         el("div", { class: "field" }, [el("label", { text: "对象" }), targetSel]),
         el("div", { class: "field" }, [el("label", { text: "对象搜索" }), targetKw]),
         el("div", { class: "field" }, [el("label", { text: "备注" }), remark]),
+      ]),
+      el("div", { class: "row score-setting-status" }, [draftInfo, currentScore]),
+    ]),
+    el("section", { class: "card score-catalog" }, [
+      el("div", { class: "section-heading" }, [
+        el("h2", { text: "选择积分项" }),
+        el("span", { class: "muted", text: "点击后立即完成积分录入" }),
+      ]),
+      el("div", { class: "score-toolbar" }, [
         el("div", { class: "field" }, [el("label", { text: "维度筛选" }), filterDim]),
-        draftInfo,
-        currentScore,
+        el("div", { class: "field" }, [el("label", { text: "关键字筛选" }), itemKw]),
       ]),
-    ]),
-    el("div", { class: "card" }, [
-      el("h2", { text: "最近使用" }),
-      el("div", { class: "grid", style: "gap:10px" }, [
-        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "加分项" })]), recentPlus]),
-        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "扣分项" })]), recentMinus]),
+      el("div", { class: "score-item-section" }, [
+        el("h3", { text: "最近使用" }),
+        el("div", { class: "score-pair-grid" }, [
+          scoreLane("加分项", "add", recentPlusCount, recentPlus),
+          scoreLane("扣分项", "deduct", recentMinusCount, recentMinus),
+        ]),
       ]),
-    ]),
-    el("div", { class: "card", style: "grid-column:1/-1" }, [
-      el("h2", { text: "全部积分项" }),
-      el("div", { class: "grid", style: "gap:10px" }, [
-        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "加分项" })]), allPlus]),
-        el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "扣分项" })]), allMinus]),
+      el("div", { class: "score-item-section all-items" }, [
+        el("h3", { text: "全部积分项" }),
+        el("div", { class: "score-pair-grid" }, [
+          scoreLane("加分项", "add", allPlusCount, allPlus),
+          scoreLane("扣分项", "deduct", allMinusCount, allMinus),
+        ]),
       ]),
     ]),
   ]);
@@ -1921,14 +1972,14 @@ function viewOperationLogs() {
     ]),
     el("div", { class: "card" }, [
       el("div", { class: "section-heading" }, [
-        el("h2", { text: "操作日志" }),
+        el("h2", { text: "积分记录日志" }),
         el("span", { class: "muted", text: "加减分与撤销记录" }),
       ]),
       entries,
     ]),
   ]);
 
-  return shell("操作日志", content);
+  return shell("积分记录日志", content);
 }
 
 function viewRankings() {
