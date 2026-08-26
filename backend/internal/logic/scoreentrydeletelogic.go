@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"class-management-system/backend/internal/httperr"
 	"class-management-system/backend/internal/model"
@@ -32,15 +35,28 @@ func NewScoreEntryDeleteLogic(ctx context.Context, svcCtx *svc.ServiceContext) *
 	}
 }
 
-func (l *ScoreEntryDeleteLogic) ScoreEntryDelete(id int64) (resp *types.Empty, err error) {
+func (l *ScoreEntryDeleteLogic) ScoreEntryDelete(id int64, req *types.ScoreEntryRevokeReq) (resp *types.Empty, err error) {
 	if id <= 0 {
 		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "invalid id"}
+	}
+	reason := ""
+	if req != nil {
+		reason = strings.TrimSpace(req.Reason)
+	}
+	if reason == "" {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "revoke reason is required"}
+	}
+	if utf8.RuneCountInString(reason) > 255 {
+		return nil, &httperr.Error{Code: http.StatusBadRequest, Msg: "revoke reason is too long"}
 	}
 
 	if err := l.svcCtx.DB.WithContext(l.ctx).Transaction(func(tx *gorm.DB) error {
 		var e model.ScoreEntry
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&e, id).Error; err != nil {
 			return err
+		}
+		if e.RevokedAt != nil {
+			return &httperr.Error{Code: http.StatusConflict, Msg: "score entry was already revoked"}
 		}
 		var student model.Student
 		studentErr := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&student, e.StudentID).Error
@@ -53,12 +69,16 @@ func (l *ScoreEntryDeleteLogic) ScoreEntryDelete(id int64) (resp *types.Empty, e
 		} else if !errors.Is(studentErr, gorm.ErrRecordNotFound) {
 			return studentErr
 		}
-		result := tx.Delete(&model.ScoreEntry{}, id)
+		now := time.Now()
+		result := tx.Model(&model.ScoreEntry{}).Where("id = ? AND revoked_at IS NULL", id).Updates(map[string]any{
+			"revoked_at":    now,
+			"revoke_reason": reason,
+		})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
+			return &httperr.Error{Code: http.StatusConflict, Msg: "score entry was already revoked"}
 		}
 		return nil
 	}); err != nil {

@@ -46,7 +46,7 @@ type GroupStudentScoreRow struct {
 }
 
 func (r *RankingRepo) StudentTotals(ctx context.Context, monthStart time.Time, monthEnd time.Time, dimensionID int64) ([]StudentScoreRow, error) {
-	joinEntries := "LEFT JOIN score_entries e ON e.student_id = s.id AND e.created_at >= ? AND e.created_at < ?"
+	joinEntries := "LEFT JOIN score_entries e ON e.student_id = s.id AND e.revoked_at IS NULL AND e.created_at >= ? AND e.created_at < ?"
 	joinArgs := []any{monthStart, monthEnd}
 	if dimensionID != 0 {
 		joinEntries = joinEntries + " AND e.dimension_id = ?"
@@ -115,6 +115,7 @@ func (r *RankingRepo) StudentTotalScoreRanking(ctx context.Context) ([]StudentSc
 			       SUM(CASE WHEN score < 0 THEN score ELSE 0 END) AS deducted_score,
 			       COUNT(id) AS entry_count
 			FROM score_entries
+			WHERE revoked_at IS NULL
 			GROUP BY student_id
 		) es ON es.student_id = s.id`).
 		Where("s.deleted_at IS NULL").

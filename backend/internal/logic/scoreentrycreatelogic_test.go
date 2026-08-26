@@ -50,6 +50,7 @@ func TestScoreRequestFingerprint(t *testing.T) {
 
 func TestScoreEntryRespIncludesHistoricalSnapshots(t *testing.T) {
 	createdAt := time.Unix(1_700_000_000, 0)
+	revokedAt := createdAt.Add(time.Hour)
 	entry := &model.ScoreEntry{
 		BaseModel:             model.BaseModel{ID: 7, CreatedAt: createdAt},
 		StudentID:             11,
@@ -64,6 +65,8 @@ func TestScoreEntryRespIncludesHistoricalSnapshots(t *testing.T) {
 		GroupNameSnapshot:     "第一组",
 		DimensionNameSnapshot: "课堂表现",
 		ScoreItemNameSnapshot: "积极发言",
+		RevokedAt:             &revokedAt,
+		RevokeReason:          "录入对象错误",
 	}
 	resp := scoreEntryResp(entry)
 	if resp.Id != entry.ID || resp.RequestId != entry.RequestID || resp.CreatedAt != createdAt.Unix() {
@@ -72,5 +75,8 @@ func TestScoreEntryRespIncludesHistoricalSnapshots(t *testing.T) {
 	if resp.StudentNameSnapshot != entry.StudentNameSnapshot || resp.GroupNameSnapshot != entry.GroupNameSnapshot ||
 		resp.DimensionNameSnapshot != entry.DimensionNameSnapshot || resp.ScoreItemNameSnapshot != entry.ScoreItemNameSnapshot {
 		t.Fatalf("scoreEntryResp() snapshots = %+v", resp)
+	}
+	if resp.RevokedAt != revokedAt.Unix() || resp.RevokeReason != entry.RevokeReason {
+		t.Fatalf("scoreEntryResp() revoke fields = %+v", resp)
 	}
 }

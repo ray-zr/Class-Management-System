@@ -68,6 +68,19 @@ type MeResp struct {
 	Username string `json:"username"`
 }
 
+type OperationLogListReq struct {
+	PageReq
+	StudentId int64  `form:"studentId,optional" json:"studentId,optional"`
+	GroupId   int64  `form:"groupId,optional" json:"groupId,optional"`
+	StartDate string `form:"startDate,optional" json:"startDate,optional"` // YYYY-MM-DD, inclusive
+	EndDate   string `form:"endDate,optional" json:"endDate,optional"`     // YYYY-MM-DD, inclusive
+}
+
+type OperationLogListResp struct {
+	Total int64            `json:"total"`
+	Items []ScoreEntryResp `json:"items"`
+}
+
 type PageReq struct {
 	Page int64 `form:"page,optional" json:"page,optional"`
 	Size int64 `form:"size,optional" json:"size,optional"`
@@ -145,6 +158,12 @@ type ScoreEntryResp struct {
 	DimensionNameSnapshot string `json:"dimensionNameSnapshot"`
 	ScoreItemNameSnapshot string `json:"scoreItemNameSnapshot"`
 	CreatedAt             int64  `json:"createdAt"`
+	RevokedAt             int64  `json:"revokedAt"`
+	RevokeReason          string `json:"revokeReason"`
+}
+
+type ScoreEntryRevokeReq struct {
+	Reason string `json:"reason"`
 }
 
 type ScoreItemCreateReq struct {

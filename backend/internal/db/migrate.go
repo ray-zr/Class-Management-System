@@ -80,7 +80,7 @@ func ReconcileStudentScoreDetails(ctx context.Context, gdb *gorm.DB) error {
 		var rows []scoreDifferenceRow
 		if err := tx.Table("students s").
 			Joins("LEFT JOIN `groups` g ON g.id = s.group_id").
-			Joins("LEFT JOIN (SELECT student_id, SUM(score) AS entry_total FROM score_entries GROUP BY student_id) totals ON totals.student_id = s.id").
+			Joins("LEFT JOIN (SELECT student_id, SUM(score) AS entry_total FROM score_entries WHERE revoked_at IS NULL GROUP BY student_id) totals ON totals.student_id = s.id").
 			Select(`s.id AS student_id,
 				s.group_id AS group_id,
 				s.student_no AS student_no,

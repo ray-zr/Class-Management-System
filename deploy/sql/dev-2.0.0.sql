@@ -124,6 +124,46 @@ PREPARE cms_migration_stmt FROM @cms_ddl;
 EXECUTE cms_migration_stmt;
 DEALLOCATE PREPARE cms_migration_stmt;
 
+-- Revocations remain queryable as immutable operation history.
+SET @cms_ddl := (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE `score_entries` ADD COLUMN `revoked_at` datetime(3) NULL',
+        'DO 0')
+    FROM information_schema.columns
+    WHERE table_schema = @cms_schema
+      AND table_name = 'score_entries'
+      AND column_name = 'revoked_at'
+);
+PREPARE cms_migration_stmt FROM @cms_ddl;
+EXECUTE cms_migration_stmt;
+DEALLOCATE PREPARE cms_migration_stmt;
+
+SET @cms_ddl := (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE `score_entries` ADD COLUMN `revoke_reason` varchar(255) NOT NULL DEFAULT ''''',
+        'DO 0')
+    FROM information_schema.columns
+    WHERE table_schema = @cms_schema
+      AND table_name = 'score_entries'
+      AND column_name = 'revoke_reason'
+);
+PREPARE cms_migration_stmt FROM @cms_ddl;
+EXECUTE cms_migration_stmt;
+DEALLOCATE PREPARE cms_migration_stmt;
+
+SET @cms_ddl := (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE `score_entries` ADD INDEX `idx_score_entries_revoked_at` (`revoked_at`)',
+        'DO 0')
+    FROM information_schema.statistics
+    WHERE table_schema = @cms_schema
+      AND table_name = 'score_entries'
+      AND index_name = 'idx_score_entries_revoked_at'
+);
+PREPARE cms_migration_stmt FROM @cms_ddl;
+EXECUTE cms_migration_stmt;
+DEALLOCATE PREPARE cms_migration_stmt;
+
 -- One operation row owns each client request ID.
 CREATE TABLE IF NOT EXISTS `score_operations` (
     `id` bigint NOT NULL AUTO_INCREMENT,

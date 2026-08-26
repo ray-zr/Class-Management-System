@@ -203,10 +203,6 @@ func (r *ScoreEntryRepo) Get(ctx context.Context, id int64) (*model.ScoreEntry, 
 	return &e, nil
 }
 
-func (r *ScoreEntryRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.ScoreEntry{}, id).Error
-}
-
 type ScoreOperationRepo struct{ db *gorm.DB }
 
 func NewScoreOperationRepo(db *gorm.DB) *ScoreOperationRepo { return &ScoreOperationRepo{db: db} }
@@ -247,8 +243,17 @@ type ScoreEntryListFilter struct {
 	Limit     int64
 }
 
+type OperationLogListFilter struct {
+	StudentID int64
+	GroupID   int64
+	Start     time.Time
+	End       time.Time
+	Offset    int64
+	Limit     int64
+}
+
 func (r *ScoreEntryRepo) List(ctx context.Context, f ScoreEntryListFilter) (total int64, items []model.ScoreEntry, err error) {
-	q := r.db.WithContext(ctx).Model(&model.ScoreEntry{})
+	q := r.db.WithContext(ctx).Model(&model.ScoreEntry{}).Where("revoked_at IS NULL")
 	if f.StudentID != 0 {
 		q = q.Where("student_id = ?", f.StudentID)
 	}
@@ -271,11 +276,38 @@ func (r *ScoreEntryRepo) List(ctx context.Context, f ScoreEntryListFilter) (tota
 	return total, res, nil
 }
 
+func (r *ScoreEntryRepo) ListOperationLogs(ctx context.Context, f OperationLogListFilter) (total int64, items []model.ScoreEntry, err error) {
+	q := r.db.WithContext(ctx).Model(&model.ScoreEntry{})
+	if f.StudentID != 0 {
+		q = q.Where("student_id = ?", f.StudentID)
+	}
+	if f.GroupID != 0 {
+		q = q.Where("group_id = ?", f.GroupID)
+	}
+	if !f.Start.IsZero() && !f.End.IsZero() {
+		q = q.Where(
+			"(created_at >= ? AND created_at < ?) OR (revoked_at >= ? AND revoked_at < ?)",
+			f.Start, f.End, f.Start, f.End,
+		)
+	}
+	if err := q.Count(&total).Error; err != nil {
+		return 0, nil, err
+	}
+	if f.Limit > 0 {
+		q = q.Offset(int(f.Offset)).Limit(int(f.Limit))
+	}
+	if err := q.Order("CASE WHEN revoked_at IS NOT NULL AND revoked_at > created_at THEN revoked_at ELSE created_at END DESC, id DESC").Find(&items).Error; err != nil {
+		return 0, nil, err
+	}
+	return total, items, nil
+}
+
 func (r *ScoreEntryRepo) ListCurrentStudentsForExport(ctx context.Context, start, end time.Time, dimensionID int64) ([]model.ScoreEntry, error) {
 	q := r.db.WithContext(ctx).
 		Table("score_entries e").
 		Select("e.*").
-		Joins("JOIN students s ON s.id = e.student_id AND s.deleted_at IS NULL")
+		Joins("JOIN students s ON s.id = e.student_id AND s.deleted_at IS NULL").
+		Where("e.revoked_at IS NULL")
 	if !start.IsZero() {
 		q = q.Where("e.created_at >= ?", start)
 	}

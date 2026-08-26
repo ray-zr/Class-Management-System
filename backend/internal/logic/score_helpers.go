@@ -25,7 +25,7 @@ func scoreEntryResp(entry *model.ScoreEntry) *types.ScoreEntryResp {
 	if entry == nil {
 		return nil
 	}
-	return &types.ScoreEntryResp{
+	resp := &types.ScoreEntryResp{
 		Id:                    entry.ID,
 		StudentId:             entry.StudentID,
 		GroupId:               entry.GroupID,
@@ -40,5 +40,10 @@ func scoreEntryResp(entry *model.ScoreEntry) *types.ScoreEntryResp {
 		DimensionNameSnapshot: entry.DimensionNameSnapshot,
 		ScoreItemNameSnapshot: entry.ScoreItemNameSnapshot,
 		CreatedAt:             entry.CreatedAt.Unix(),
+		RevokeReason:          entry.RevokeReason,
 	}
+	if entry.RevokedAt != nil {
+		resp.RevokedAt = entry.RevokedAt.Unix()
+	}
+	return resp
 }

@@ -135,9 +135,9 @@ const appState = {
   rankings: [],
   groupRankings: [],
   dimensionStats: { dimensionId: 0, startDate: "", endDate: "", items: [] },
-  scoreEntries: { total: 0, items: [] },
-  scoreEntriesQuery: { page: 1, size: 20, studentId: 0, groupId: 0, sinceDays: 30 },
-  scoreEntriesStudentKeyword: "",
+  operationLogs: { total: 0, items: [] },
+  operationLogsQuery: { page: 1, size: 20, studentId: 0, groupId: 0, ...defaultOperationLogRange() },
+  operationLogsStudentKeyword: "",
   rollcallPickCount: 1,
   rollcall: { roundId: "", students: [], remaining: 0 },
   groupsStudentKeyword: "",
@@ -169,6 +169,18 @@ function clearScoreDraft() {
 
 function pad2(n) {
   return String(n).padStart(2, "0");
+}
+
+function formatLocalDate(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function defaultOperationLogRange() {
+  const now = new Date();
+  return {
+    startDate: formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+    endDate: formatLocalDate(now),
+  };
 }
 
 function fmtClock(ms) {
@@ -289,15 +301,15 @@ async function loadGroupRankings(params = {}) {
   appState.groupRankings = res.items || [];
 }
 
-async function loadScoreEntries(params = {}) {
+async function loadOperationLogs(params = {}) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "" || Number.isNaN(v)) continue;
     if (typeof v === "number" && v === 0 && (k === "studentId" || k === "groupId")) continue;
     q.set(k, String(v));
   }
-  const res = await apiFetch(`/score-entries${q.toString() ? `?${q}` : ""}`);
-  appState.scoreEntries = { total: Number(res.total || 0), items: res.items || [] };
+  const res = await apiFetch(`/operation-logs${q.toString() ? `?${q}` : ""}`);
+  appState.operationLogs = { total: Number(res.total || 0), items: res.items || [] };
 }
 
 async function groupCreate(name) {
@@ -376,8 +388,89 @@ async function scoreEntryCreate(payload) {
   });
 }
 
-async function scoreEntryDelete(id) {
-  await apiFetch(`/score-entries/${id}`, { method: "DELETE" });
+async function scoreEntryDelete(id, reason) {
+  await apiFetch(`/score-entries/${id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+function requestRevokeReason(entry) {
+  return new Promise((resolve) => {
+    const score = Number(entry.score || 0);
+    const reason = el("textarea", {
+      rows: "4",
+      maxlength: "255",
+      placeholder: "例如：选错学生、积分项录入错误",
+      autofocus: "",
+    });
+    const error = el("p", { class: "form-error", role: "alert" });
+    const dialog = el("dialog", { class: "revoke-dialog", "aria-labelledby": "revoke-dialog-title" });
+    let settled = false;
+
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+
+    const form = el("form", {
+      class: "revoke-form",
+      onsubmit: (event) => {
+        event.preventDefault();
+        const value = reason.value.trim();
+        if (!value) {
+          error.textContent = "请输入撤销原因";
+          reason.focus();
+          return;
+        }
+        finish(value);
+      },
+    }, [
+      el("div", { class: "dialog-heading" }, [
+        el("div", {}, [
+          el("p", { class: "dialog-eyebrow", text: "撤销积分操作" }),
+          el("h2", { id: "revoke-dialog-title", text: "确认撤销" }),
+        ]),
+        el("button", {
+          class: "icon-button",
+          type: "button",
+          text: "×",
+          title: "关闭",
+          "aria-label": "关闭",
+          onclick: () => finish(null),
+        }),
+      ]),
+      el("div", { class: "revoke-summary" }, [
+        el("strong", { text: entry.studentNameSnapshot || studentNameById(entry.studentId) }),
+        el("span", { text: entry.scoreItemNameSnapshot || `积分项 ${entry.scoreItemId}` }),
+        el("span", { class: score >= 0 ? "score pos" : "score neg", text: `${score >= 0 ? "+" : ""}${score}` }),
+      ]),
+      el("div", { class: "field" }, [
+        el("label", { for: "revoke-reason", text: "撤销原因" }),
+        reason,
+        error,
+      ]),
+      el("div", { class: "dialog-actions" }, [
+        el("button", { class: "btn", type: "button", text: "取消", onclick: () => finish(null) }),
+        el("button", { class: "btn btn-danger", type: "submit", text: "确认撤销" }),
+      ]),
+    ]);
+    reason.id = "revoke-reason";
+    reason.addEventListener("input", () => {
+      if (reason.value.trim()) error.textContent = "";
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(null);
+    });
+    dialog.appendChild(form);
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  });
 }
 
 async function rollcallStart(fair) {
@@ -464,7 +557,6 @@ function shell(title, content) {
     { key: "rollcall", label: "随机点名" },
     { key: "groups", label: "小组管理" },
     { key: "config", label: "维度与积分项" },
-    { key: "entries", label: "积分记录" },
     { key: "rankings", label: "排行榜" },
     { key: "timer", label: "计时器" },
   ];
@@ -483,13 +575,13 @@ function shell(title, content) {
     if (routeKey === "config") {
       await Promise.all([loadStudentsForPickers(), loadDimensions(), loadScoreItems()]);
     }
-    if (routeKey === "entries") {
+    if (routeKey === "logs") {
       await Promise.all([
         loadStudentsForPickers(),
         loadGroups(),
         loadDimensions(),
         loadScoreItems(),
-        loadScoreEntries(appState.scoreEntriesQuery),
+        loadOperationLogs(appState.operationLogsQuery),
       ]);
     }
     if (routeKey === "rankings") {
@@ -523,6 +615,21 @@ function shell(title, content) {
     },
   });
 
+  const operationLogs = el("button", {
+    class: appState.route === "logs" ? "btn btn-utility active" : "btn btn-utility",
+    text: "操作日志",
+    "aria-current": appState.route === "logs" ? "page" : null,
+    onclick: async () => {
+      appState.route = "logs";
+      try {
+        await loadForRoute("logs");
+      } catch (e) {
+        toast(String(e.message || e));
+      }
+      render();
+    },
+  });
+
   return el("div", { class: "shell" }, [
     el("aside", { class: "sidebar" }, [
       el("div", { class: "brand" }, [
@@ -534,7 +641,7 @@ function shell(title, content) {
     el("main", { class: "main" }, [
       el("div", { class: "topbar" }, [
         el("h2", { class: "title", text: title }),
-        logout,
+        el("div", { class: "topbar-tools" }, [operationLogs, logout]),
       ]),
       content,
     ]),
@@ -1567,8 +1674,8 @@ function viewConfig() {
   return shell("维度与积分项", content);
 }
 
-function viewEntries() {
-  const q = { ...appState.scoreEntriesQuery };
+function viewOperationLogs() {
+  const q = { ...appState.operationLogsQuery };
 
   function tokenizeKw(v) {
     const s = String(v || "").trim().toLowerCase();
@@ -1584,7 +1691,7 @@ function viewEntries() {
 
   const stuSel = el("select");
   const stuKw = el("input", { type: "text", placeholder: "搜索（学号/姓名）" });
-  stuKw.value = String(appState.scoreEntriesStudentKeyword || "");
+  stuKw.value = String(appState.operationLogsStudentKeyword || "");
   stuSel.appendChild(el("option", { value: "0", text: "全部学生" }));
 
   function refreshStudents() {
@@ -1621,7 +1728,7 @@ function viewEntries() {
 
   refreshStudents();
   stuKw.addEventListener("input", () => {
-    appState.scoreEntriesStudentKeyword = stuKw.value || "";
+    appState.operationLogsStudentKeyword = stuKw.value || "";
     refreshStudents();
   });
 
@@ -1632,8 +1739,8 @@ function viewEntries() {
   }
   groupSel.value = String(q.groupId || 0);
 
-  const sinceDays = el("input", { type: "number", min: "0", max: "36500", placeholder: "0 表示全部" });
-  sinceDays.value = String(q.sinceDays ?? 30);
+  const startDate = el("input", { type: "date", value: q.startDate || "" });
+  const endDate = el("input", { type: "date", value: q.endDate || "" });
 
   const size = el("input", { type: "number", min: "1", max: "200" });
   size.value = String(q.size || 20);
@@ -1646,14 +1753,21 @@ function viewEntries() {
         if (stuSel.disabled) {
           throw new Error("请选择学生");
         }
-        appState.scoreEntriesQuery = {
+        if (!startDate.value || !endDate.value) {
+          throw new Error("请选择完整的时间范围");
+        }
+        if (startDate.value > endDate.value) {
+          throw new Error("结束日期不能早于开始日期");
+        }
+        appState.operationLogsQuery = {
           page: 1,
           size: Math.max(1, Math.min(200, Number(size.value || 20))),
           studentId: Number(stuSel.value || 0),
           groupId: Number(groupSel.value || 0),
-          sinceDays: Math.max(0, Math.min(36500, Number(sinceDays.value || 0))),
+          startDate: startDate.value,
+          endDate: endDate.value,
         };
-        await loadScoreEntries(appState.scoreEntriesQuery);
+        await loadOperationLogs(appState.operationLogsQuery);
         render();
       } catch (e) {
         toast(String(e.message || e));
@@ -1666,10 +1780,10 @@ function viewEntries() {
     text: "上一页",
     onclick: async () => {
       try {
-        const cur = appState.scoreEntriesQuery.page || 1;
+        const cur = appState.operationLogsQuery.page || 1;
         if (cur <= 1) return;
-        appState.scoreEntriesQuery = { ...appState.scoreEntriesQuery, page: cur - 1 };
-        await loadScoreEntries(appState.scoreEntriesQuery);
+        appState.operationLogsQuery = { ...appState.operationLogsQuery, page: cur - 1 };
+        await loadOperationLogs(appState.operationLogsQuery);
         render();
       } catch (e) {
         toast(String(e.message || e));
@@ -1681,12 +1795,12 @@ function viewEntries() {
     text: "下一页",
     onclick: async () => {
       try {
-        const cur = appState.scoreEntriesQuery.page || 1;
-        const sz = appState.scoreEntriesQuery.size || 20;
-        const total = appState.scoreEntries.total || 0;
+        const cur = appState.operationLogsQuery.page || 1;
+        const sz = appState.operationLogsQuery.size || 20;
+        const total = appState.operationLogs.total || 0;
         if (cur * sz >= total) return;
-        appState.scoreEntriesQuery = { ...appState.scoreEntriesQuery, page: cur + 1 };
-        await loadScoreEntries(appState.scoreEntriesQuery);
+        appState.operationLogsQuery = { ...appState.operationLogsQuery, page: cur + 1 };
+        await loadOperationLogs(appState.operationLogsQuery);
         render();
       } catch (e) {
         toast(String(e.message || e));
@@ -1696,8 +1810,8 @@ function viewEntries() {
 
 
   const pager = el("div", { class: "row" }, [
-    el("span", { class: "pill" }, [el("span", { text: `第 ${appState.scoreEntriesQuery.page || 1} 页` })]),
-    el("span", { class: "pill" }, [el("span", { text: `共 ${appState.scoreEntries.total || 0} 条` })]),
+    el("span", { class: "pill" }, [el("span", { text: `第 ${appState.operationLogsQuery.page || 1} 页` })]),
+    el("span", { class: "pill" }, [el("span", { text: `共 ${appState.operationLogs.total || 0} 条` })]),
     prev,
     next,
 
@@ -1714,60 +1828,80 @@ function viewEntries() {
     : null;
 
 
-  const entries = el(
-    "div",
-    { class: "list" },
-    (appState.scoreEntries.items || []).map((e) => {
-      const item = scoreItemById(e.scoreItemId);
-      const score = Number(e.score || 0);
-      const scoreCls = score >= 0 ? "score pos" : "score neg";
-      const when = e.createdAt ? new Date(Number(e.createdAt) * 1000).toLocaleString() : "";
-      const itemName = e.scoreItemNameSnapshot || (item ? item.name : `积分项ID ${e.scoreItemId}`);
-      const dimName = e.dimensionNameSnapshot || (item ? dimensionNameById(item.dimensionId) : dimensionNameById(e.dimensionId));
-      const studentName = e.studentNameSnapshot || studentNameById(e.studentId);
-      const groupName = e.groupNameSnapshot || groupNameById(e.groupId);
-      const remark = (e.remark || "").trim();
+  const logItems = (appState.operationLogs.items || []).map((e) => {
+    const item = scoreItemById(e.scoreItemId);
+    const score = Number(e.score || 0);
+    const revokedAt = Number(e.revokedAt || 0);
+    const itemName = e.scoreItemNameSnapshot || (item ? item.name : `积分项ID ${e.scoreItemId}`);
+    const dimName = e.dimensionNameSnapshot || (item ? dimensionNameById(item.dimensionId) : dimensionNameById(e.dimensionId));
+    const studentName = e.studentNameSnapshot || studentNameById(e.studentId);
+    const studentNo = e.studentNoSnapshot || String(e.studentId);
+    const groupName = e.groupNameSnapshot || groupNameById(e.groupId);
+    const remark = (e.remark || "").trim();
+    const revokeReason = (e.revokeReason || "").trim();
+    const createdWhen = e.createdAt ? new Date(Number(e.createdAt) * 1000).toLocaleString() : "";
+    const revokedWhen = revokedAt ? new Date(revokedAt * 1000).toLocaleString() : "";
 
+    const revokeBtn = !revokedAt
+      ? el("button", {
+          class: "btn btn-small btn-danger",
+          text: "撤销操作",
+          onclick: async () => {
+            try {
+              const reason = await requestRevokeReason(e);
+              if (!reason) return;
+              await scoreEntryDelete(e.id, reason);
+              toast("积分操作已撤销");
+              await Promise.all([
+                loadStudentsForPickers(),
+                loadGroups(),
+                loadOperationLogs(appState.operationLogsQuery),
+              ]);
+              render();
+            } catch (err) {
+              toast(String(err.message || err));
+            }
+          },
+        })
+      : null;
 
-      const canRevoke = true;
-      const revokeBtn = canRevoke
-        ? el("button", {
-            class: "btn btn-small btn-danger",
-            text: "撤销",
-            onclick: async () => {
-              try {
-                const ok = window.confirm("确认撤销这条积分记录？");
-                if (!ok) return;
-                await scoreEntryDelete(e.id);
-                toast("已撤销");
-                await Promise.all([loadStudentsForPickers(), loadGroups(), loadScoreEntries(appState.scoreEntriesQuery)]);
-                render();
-              } catch (err) {
-                toast(String(err.message || err));
-              }
-            },
-          })
-        : null;
-
-      return el("div", { class: "entry-item" }, [
-        el("div", { class: "kv" }, [
-          el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, [
-            el("strong", { text: studentName }),
-            el("span", { class: "pill" }, [el("span", { text: groupName })]),
-            el("span", { class: "pill" }, [el("span", { text: dimName })]),
-            el("span", { class: "pill" }, [el("span", { text: itemName })]),
+    return el("article", { class: revokedAt ? "operation-item revoked" : "operation-item" }, [
+      el("div", { class: "operation-head" }, [
+        el("span", { class: score >= 0 ? "operation-kind add" : "operation-kind deduct", text: score >= 0 ? "加分" : "减分" }),
+        el("div", { class: "operation-person" }, [
+          el("strong", { text: studentName }),
+          el("div", { class: "operation-identity" }, [
+            el("span", { text: `学生ID ${studentNo}` }),
+            el("span", { text: groupName }),
           ]),
-          el("div", { class: scoreCls, text: `${score >= 0 ? "+" : ""}${score}` }),
-
         ]),
-        el("div", { class: "row", style: "justify-content:space-between" }, [
-          el("span", { class: "muted", text: when }),
-          remark ? el("span", { class: "muted", text: `备注：${remark}` }) : el("span"),
+        el("div", { class: score >= 0 ? "operation-score pos" : "operation-score neg", text: `${score >= 0 ? "+" : ""}${score}` }),
+        el("span", { class: revokedAt ? "status-badge revoked" : "status-badge active", text: revokedAt ? "已撤销" : "有效" }),
+      ]),
+      el("div", { class: "operation-tags" }, [
+        el("span", { text: dimName }),
+        el("strong", { text: itemName }),
+      ]),
+      el("div", { class: "operation-timeline" }, [
+        el("div", { class: "timeline-row" }, [
+          el("span", { class: "timeline-label", text: "操作时间" }),
+          el("time", { text: createdWhen }),
+          remark ? el("span", { class: "timeline-detail", text: `备注：${remark}` }) : null,
         ]),
-        revokeBtn ? el("div", { class: "row", style: "justify-content:flex-end" }, [revokeBtn]) : null,
-      ]);
-    })
-  );
+        revokedAt
+          ? el("div", { class: "timeline-row revoke-row" }, [
+              el("span", { class: "timeline-label", text: "撤销时间" }),
+              el("time", { text: revokedWhen }),
+              el("span", { class: "timeline-detail", text: `原因：${revokeReason}` }),
+            ])
+          : null,
+      ]),
+      revokeBtn ? el("div", { class: "operation-actions" }, [revokeBtn]) : null,
+    ]);
+  });
+  const entries = el("div", { class: "list operation-list" }, logItems.length
+    ? logItems
+    : [el("div", { class: "empty-state", text: "当前时间范围内没有操作记录" })]);
 
   const content = el("div", { class: "grid" }, [
     el("div", { class: "card" }, [
@@ -1777,7 +1911,8 @@ function viewEntries() {
         el("div", { class: "field" }, [el("label", { text: "学生" }), stuSel]),
         el("div", { class: "field" }, [el("label", { text: "学生搜索" }), stuKw]),
         el("div", { class: "field" }, [el("label", { text: "小组" }), groupSel]),
-        el("div", { class: "field" }, [el("label", { text: "最近天数（0=全部）" }), sinceDays]),
+        el("div", { class: "field" }, [el("label", { text: "开始日期" }), startDate]),
+        el("div", { class: "field" }, [el("label", { text: "结束日期" }), endDate]),
         el("div", { class: "field" }, [el("label", { text: "每页条数" }), size]),
         query,
       ]),
@@ -1785,12 +1920,15 @@ function viewEntries() {
       pager,
     ]),
     el("div", { class: "card" }, [
-      el("h2", { text: "积分记录" }),
+      el("div", { class: "section-heading" }, [
+        el("h2", { text: "操作日志" }),
+        el("span", { class: "muted", text: "加减分与撤销记录" }),
+      ]),
       entries,
     ]),
   ]);
 
-  return shell("积分记录", content);
+  return shell("操作日志", content);
 }
 
 function viewRankings() {
@@ -1876,32 +2014,47 @@ function viewRankings() {
 
   const list = el(
     "div",
-    { class: "list" },
+    { class: "list ranking-list" },
     (typeSel.value === "groups" ? appState.groupRankings : appState.rankings || []).map((it) => {
+      const rank = Number(it.rank || 0);
+      const rankClass = rank >= 1 && rank <= 3 ? ` top-${rank}` : "";
+      const rankBlock = el("div", { class: `rank-block${rankClass}` }, [
+        el("span", { class: "rank-prefix", text: "第" }),
+        el("strong", { class: "rank-number", text: String(rank) }),
+        el("span", { class: "rank-suffix", text: "名" }),
+      ]);
       if (typeSel.value === "groups") {
         const g = it.group;
         const score = Number(it.score || 0);
         const scoreCls = score >= 0 ? "score pos" : "score neg";
-        const name = `${pad2(it.rank)} ${g.name}`;
-        return el("div", { class: "student-item", style: it.highlight ? "outline:3px solid rgba(242, 178, 75, 0.35);" : "" }, [
-          el("div", { class: "student-name" }, [
-            el("div", { class: "combo", text: name }),
-            el("div", { class: "meta", text: "平均分" }),
+        return el("article", { class: it.highlight ? "ranking-item highlighted" : "ranking-item" }, [
+          rankBlock,
+          el("div", { class: "ranking-person" }, [
+            el("strong", { class: "ranking-name", text: g.name }),
+            el("div", { class: "ranking-meta" }, [el("span", { text: `小组ID ${g.id}` })]),
           ]),
-          el("div", { class: scoreCls, text: String(score) }),
+          el("div", { class: "ranking-score" }, [
+            el("span", { text: "平均分" }),
+            el("strong", { class: scoreCls, text: String(score) }),
+          ]),
         ]);
       }
       const s = it.student;
       const score = Number(it.score || 0);
       const scoreCls = score >= 0 ? "score pos" : "score neg";
-      const name = `${pad2(it.rank)} ${s.name}`;
-      const meta = `${s.studentNo}${s.position ? ` · ${s.position}` : ""}`;
-      return el("div", { class: "student-item", style: it.highlight ? "outline:3px solid rgba(242, 178, 75, 0.35);" : "" }, [
-        el("div", { class: "student-name" }, [
-          el("div", { class: "combo", text: name }),
-          el("div", { class: "meta", text: meta }),
+      return el("article", { class: it.highlight ? "ranking-item highlighted" : "ranking-item" }, [
+        rankBlock,
+        el("div", { class: "ranking-person" }, [
+          el("strong", { class: "ranking-name", text: s.name }),
+          el("div", { class: "ranking-meta" }, [
+            el("span", { class: "student-id", text: `学生ID ${s.studentNo}` }),
+            s.position ? el("span", { text: s.position }) : null,
+          ]),
         ]),
-        el("div", { class: scoreCls, text: String(score) }),
+        el("div", { class: "ranking-score" }, [
+          el("span", { text: "积分" }),
+          el("strong", { class: scoreCls, text: String(score) }),
+        ]),
       ]);
     })
   );
@@ -2163,13 +2316,13 @@ async function ensureDataForRoute() {
   if (appState.route === "config") {
     await Promise.all([loadStudentsForPickers(), loadDimensions(), loadScoreItems()]);
   }
-  if (appState.route === "entries") {
+  if (appState.route === "logs") {
     await Promise.all([
       loadStudentsForPickers(),
       loadGroups(),
       loadDimensions(),
       loadScoreItems(),
-      loadScoreEntries(appState.scoreEntriesQuery),
+      loadOperationLogs(appState.operationLogsQuery),
     ]);
   }
   if (appState.route === "rankings") {
@@ -2189,7 +2342,7 @@ function render() {
   else if (appState.route === "rollcall") root.appendChild(viewRollcall());
   else if (appState.route === "groups") root.appendChild(viewGroups());
   else if (appState.route === "config") root.appendChild(viewConfig());
-  else if (appState.route === "entries") root.appendChild(viewEntries());
+  else if (appState.route === "logs") root.appendChild(viewOperationLogs());
   else if (appState.route === "rankings") root.appendChild(viewRankings());
   else if (appState.route === "timer") root.appendChild(viewTimer());
   else root.appendChild(viewStudents());

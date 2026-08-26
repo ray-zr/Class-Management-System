@@ -142,6 +142,11 @@ type (
 		DimensionNameSnapshot string `json:"dimensionNameSnapshot"`
 		ScoreItemNameSnapshot string `json:"scoreItemNameSnapshot"`
 		CreatedAt             int64  `json:"createdAt"`
+		RevokedAt             int64  `json:"revokedAt"`
+		RevokeReason          string `json:"revokeReason"`
+	}
+	ScoreEntryRevokeReq {
+		Reason string `json:"reason"`
 	}
 	ScoreEntryListReq {
 		PageReq
@@ -150,6 +155,17 @@ type (
 		SinceDays int64 `form:"sinceDays,optional" json:"sinceDays,optional"` // 0 means all records
 	}
 	ScoreEntryListResp {
+		Total int64            `json:"total"`
+		Items []ScoreEntryResp `json:"items"`
+	}
+	OperationLogListReq {
+		PageReq
+		StudentId int64  `form:"studentId,optional" json:"studentId,optional"`
+		GroupId   int64  `form:"groupId,optional" json:"groupId,optional"`
+		StartDate string `form:"startDate,optional" json:"startDate,optional"` // YYYY-MM-DD, inclusive
+		EndDate   string `form:"endDate,optional" json:"endDate,optional"` // YYYY-MM-DD, inclusive
+	}
+	OperationLogListResp {
 		Total int64            `json:"total"`
 		Items []ScoreEntryResp `json:"items"`
 	}
@@ -287,7 +303,11 @@ service cms-api {
 	get /score-entries (ScoreEntryListReq) returns (ScoreEntryListResp)
 
 	@handler ScoreEntryDelete
-	delete /score-entries/:id returns (Empty) // revoke one score entry
+	delete /score-entries/:id (ScoreEntryRevokeReq) returns (Empty) // revoke one score entry
+
+	// Operation logs include active and revoked score entries.
+	@handler OperationLogList
+	get /operation-logs (OperationLogListReq) returns (OperationLogListResp)
 
 	// Rankings
 	@handler Ranking

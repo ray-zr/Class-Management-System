@@ -1,5 +1,5 @@
 // Code scaffolded by goctl. Safe to edit.
-// goctl 1.9.2
+// goctl 1.10.1
 
 package handler
 
@@ -12,20 +12,16 @@ import (
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
-func ScoreEntryDeleteHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+func OperationLogListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathInt64(r, "id")
-		if err != nil {
-			httpx.ErrorCtx(r.Context(), w, err)
-			return
-		}
-		var req types.ScoreEntryRevokeReq
+		var req types.OperationLogListReq
 		if err := httpx.Parse(r, &req); err != nil {
 			httpx.ErrorCtx(r.Context(), w, err)
 			return
 		}
-		l := logic.NewScoreEntryDeleteLogic(r.Context(), svcCtx)
-		resp, err := l.ScoreEntryDelete(id, &req)
+
+		l := logic.NewOperationLogListLogic(r.Context(), svcCtx)
+		resp, err := l.OperationLogList(&req)
 		if err != nil {
 			httpx.ErrorCtx(r.Context(), w, err)
 		} else {
