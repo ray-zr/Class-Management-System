@@ -1598,18 +1598,18 @@ function requestGroupDelete(group) {
 function createGroupZone(group, { interactive = false, pickedIds = new Set(), ranks = new Map() } = {}) {
   const groupId = Number(group.id);
   const rank = ranks.get(groupId) || 0;
+  const rankDescriptions = ["", "第一名，钻石边框", "第二名，黄金边框", "第三名，白银边框"];
   const students = orderedSeatStudents(groupId);
   const zone = el("section", {
     class: `seat-group${interactive ? " is-editable" : ""}${rank ? ` seat-group-rank-${rank}` : ""}`,
     "data-group-id": group.id,
-    "aria-label": `${group.name}，${students.length}人`,
+    "aria-label": `${group.name}${rank ? `，${rankDescriptions[rank]}` : ""}，${students.length}人`,
   });
 
   const title = interactive
     ? el("input", { class: "seat-group-name-input", type: "text", value: group.name, maxlength: "50", "aria-label": `${group.name}名称` })
     : el("h3", { text: group.name });
   const score = Number(group.avgScore || 0);
-  const rankLabels = ["", "冠", "亚", "季"];
   const headingItems = [];
 
   if (interactive) {
@@ -1644,9 +1644,6 @@ function createGroupZone(group, { interactive = false, pickedIds = new Set(), ra
     headingItems.push(dragHandle);
   }
 
-  headingItems.push(rank
-    ? el("span", { class: `group-rank group-rank-${rank}`, text: rankLabels[rank], title: `小组第${rank}名` })
-    : el("span", { class: "group-rank group-rank-placeholder", "aria-hidden": "true" }));
   headingItems.push(el("div", { class: "seat-group-title" }, [title, el("span", { text: `${students.length} 人` })]));
   headingItems.push(el("div", { class: score >= 0 ? "group-average is-positive" : "group-average is-negative" }, [
     el("span", { text: "平均分" }),
