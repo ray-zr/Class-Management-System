@@ -344,11 +344,11 @@ async function groupLayoutUpdate(items) {
   });
 }
 
-async function studentAssignGroup(studentId, groupId) {
-  await apiFetch(`/students/${studentId}`, {
+async function studentSeatMove(studentId, groupId, targetStudentId = 0) {
+  await apiFetch("/students/seat", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ groupId }),
+    body: JSON.stringify({ studentId, groupId, targetStudentId }),
   });
 }
 
@@ -360,15 +360,13 @@ function orderedGroups() {
   });
 }
 
-function moveGroupInLayout(movingId, targetId = 0) {
+function swapGroupInLayout(movingId, targetId) {
   if (appState.groupLayoutBusy) return;
   const ids = orderedGroups().map((group) => Number(group.id));
   const from = ids.indexOf(Number(movingId));
-  if (from < 0) return;
-  const [moving] = ids.splice(from, 1);
-  const to = targetId ? ids.indexOf(Number(targetId)) : -1;
-  if (to < 0) ids.push(moving);
-  else ids.splice(to, 0, moving);
+  const to = ids.indexOf(Number(targetId));
+  if (from < 0 || to < 0 || from === to) return;
+  [ids[from], ids[to]] = [ids[to], ids[from]];
   persistGroupLayout(ids);
 }
 
@@ -403,7 +401,7 @@ function shiftGroupInLayout(groupId, offset) {
   const index = groups.findIndex((group) => Number(group.id) === Number(groupId));
   const nextIndex = index + offset;
   if (index < 0 || nextIndex < 0 || nextIndex >= groups.length) return;
-  moveGroupInLayout(groupId, offset < 0 ? groups[nextIndex].id : groups[nextIndex + 1]?.id || 0);
+  swapGroupInLayout(groupId, groups[nextIndex].id);
 }
 
 function groupRankMap() {
@@ -1370,27 +1368,97 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function assignSeatStudent(studentId, groupId) {
+function orderedSeatStudents(groupId) {
+  return (appState.students.items || [])
+    .filter((student) => Number(student.groupId || 0) === Number(groupId || 0))
+    .sort((a, b) => {
+      const aPosition = Number(a.seatPosition || Number.MAX_SAFE_INTEGER);
+      const bPosition = Number(b.seatPosition || Number.MAX_SAFE_INTEGER);
+      return aPosition - bPosition || Number(a.id) - Number(b.id);
+    });
+}
+
+function applyOptimisticSeatMove(studentId, groupId, targetStudentId = 0) {
+  const moving = (appState.students.items || []).find((item) => Number(item.id) === Number(studentId));
+  const target = targetStudentId
+    ? (appState.students.items || []).find((item) => Number(item.id) === Number(targetStudentId))
+    : null;
+  if (!moving || (targetStudentId && !target)) return false;
+
+  const sourceGroupId = Number(moving.groupId || 0);
+  const targetGroupId = Number(groupId || 0);
+  if (target && Number(target.groupId || 0) !== targetGroupId) return false;
+
+  if (sourceGroupId === targetGroupId && target) {
+    const movingPosition = Number(moving.seatPosition || 0);
+    moving.seatPosition = Number(target.seatPosition || 0);
+    target.seatPosition = movingPosition;
+    return true;
+  }
+
+  const source = orderedSeatStudents(sourceGroupId).filter((student) => Number(student.id) !== Number(studentId));
+  const destination = sourceGroupId === targetGroupId
+    ? source
+    : orderedSeatStudents(targetGroupId).filter((student) => Number(student.id) !== Number(studentId));
+  const targetIndex = target
+    ? destination.findIndex((student) => Number(student.id) === Number(target.id))
+    : destination.length;
+  destination.splice(targetIndex < 0 ? destination.length : targetIndex, 0, moving);
+  moving.groupId = targetGroupId;
+  source.forEach((student, index) => { student.seatPosition = index + 1; });
+  destination.forEach((student, index) => { student.seatPosition = index + 1; });
+  return true;
+}
+
+async function moveSeatStudent(studentId, groupId, targetStudentId = 0) {
   if (appState.seatAssignmentBusy) return;
   const student = (appState.students.items || []).find((item) => Number(item.id) === Number(studentId));
   if (!student) return;
-  if (Number(student.groupId || 0) === Number(groupId || 0)) {
+  const target = targetStudentId
+    ? (appState.students.items || []).find((item) => Number(item.id) === Number(targetStudentId))
+    : null;
+  const sourceGroupId = Number(student.groupId || 0);
+  const targetGroupId = Number(groupId || 0);
+  if (targetStudentId === Number(studentId)) return;
+  if (sourceGroupId === targetGroupId && !targetStudentId) {
+    const seats = orderedSeatStudents(targetGroupId);
+    if (Number(seats.at(-1)?.id || 0) === Number(studentId)) {
+      appState.selectedSeatStudentId = 0;
+      render();
+      return;
+    }
+  }
+
+  const previous = new Map((appState.students.items || []).map((item) => [Number(item.id), {
+    groupId: Number(item.groupId || 0),
+    seatPosition: Number(item.seatPosition || 0),
+  }]));
+  if (!applyOptimisticSeatMove(studentId, targetGroupId, targetStudentId)) {
     appState.selectedSeatStudentId = 0;
     render();
     return;
   }
 
-  const previousGroupId = Number(student.groupId || 0);
   appState.seatAssignmentBusy = true;
   appState.selectedSeatStudentId = 0;
-  student.groupId = Number(groupId || 0);
   render();
   try {
-    await studentAssignGroup(student.id, Number(groupId || 0));
-    await loadGroups();
-    toast(`已将${student.name}移至${groupNameById(groupId)}`);
+    await studentSeatMove(student.id, targetGroupId, Number(targetStudentId || 0));
+    await Promise.all([loadStudentsForPickers(), loadGroups()]);
+    if (sourceGroupId === targetGroupId && target) {
+      toast(`已交换${student.name}与${target.name}的座位`);
+    } else if (sourceGroupId === targetGroupId) {
+      toast(`${student.name}的座位顺序已保存`);
+    } else {
+      toast(`已将${student.name}移至${groupNameById(targetGroupId)}`);
+    }
   } catch (error) {
-    student.groupId = previousGroupId;
+    for (const item of appState.students.items || []) {
+      const snapshot = previous.get(Number(item.id));
+      if (!snapshot) continue;
+      item.groupId = snapshot.groupId;
+      item.seatPosition = snapshot.seatPosition;
+    }
     try {
       await Promise.all([loadStudentsForPickers(), loadGroups()]);
     } catch {
@@ -1400,6 +1468,10 @@ async function assignSeatStudent(studentId, groupId) {
     appState.seatAssignmentBusy = false;
     render();
   }
+}
+
+async function assignSeatStudent(studentId, groupId) {
+  await moveSeatStudent(studentId, groupId, 0);
 }
 
 function readDraggedStudentId(event) {
@@ -1415,10 +1487,10 @@ function makeStudentSeat(student, { interactive = false, pickedIds = new Set() }
   const seat = el("button", {
     class: `seat-student${selected ? " is-selected" : ""}${picked ? " is-picked" : ""}`,
     type: "button",
-    draggable: interactive ? "true" : "false",
+    draggable: interactive && !appState.seatAssignmentBusy ? "true" : "false",
     "data-student-id": student.id,
     "aria-pressed": interactive ? String(selected) : null,
-    title: interactive ? `移动${student.name}` : `${student.name}，${student.studentNo}`,
+    title: interactive ? `拖拽${student.name}交换座位或调整小组` : `${student.name}，${student.studentNo}`,
   }, [
     el("strong", { text: student.name || "未命名" }),
     el("span", { text: `ID ${student.studentNo || student.id}` }),
@@ -1431,13 +1503,39 @@ function makeStudentSeat(student, { interactive = false, pickedIds = new Set() }
       render();
     });
     seat.addEventListener("dragstart", (event) => {
+      if (appState.seatAssignmentBusy) {
+        event.preventDefault();
+        return;
+      }
       event.stopPropagation();
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("application/x-cms-student", String(student.id));
       event.dataTransfer.setData("text/plain", `student:${student.id}`);
       requestAnimationFrame(() => seat.classList.add("is-dragging"));
     });
-    seat.addEventListener("dragend", () => seat.classList.remove("is-dragging"));
+    seat.addEventListener("dragover", (event) => {
+      if (![...(event.dataTransfer?.types || [])].includes("application/x-cms-student")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      seat.classList.add("is-seat-target");
+    });
+    seat.addEventListener("dragleave", (event) => {
+      if (!seat.contains(event.relatedTarget)) seat.classList.remove("is-seat-target");
+    });
+    seat.addEventListener("drop", (event) => {
+      const movingId = readDraggedStudentId(event);
+      event.preventDefault();
+      event.stopPropagation();
+      seat.classList.remove("is-seat-target");
+      if (!movingId || movingId === Number(student.id)) return;
+      moveSeatStudent(movingId, Number(student.groupId || 0), Number(student.id));
+    });
+    seat.addEventListener("dragend", () => {
+      seat.classList.remove("is-dragging");
+      document.querySelectorAll(".seat-student.is-seat-target").forEach((item) => item.classList.remove("is-seat-target"));
+      document.querySelectorAll(".is-drop-target").forEach((item) => item.classList.remove("is-drop-target"));
+    });
   }
   return seat;
 }
@@ -1500,7 +1598,7 @@ function requestGroupDelete(group) {
 function createGroupZone(group, { interactive = false, pickedIds = new Set(), ranks = new Map() } = {}) {
   const groupId = Number(group.id);
   const rank = ranks.get(groupId) || 0;
-  const students = (appState.students.items || []).filter((student) => Number(student.groupId || 0) === groupId);
+  const students = orderedSeatStudents(groupId);
   const zone = el("section", {
     class: `seat-group${interactive ? " is-editable" : ""}${rank ? ` seat-group-rank-${rank}` : ""}`,
     "data-group-id": group.id,
@@ -1517,12 +1615,12 @@ function createGroupZone(group, { interactive = false, pickedIds = new Set(), ra
   if (interactive) {
     const dragHandle = el("span", {
       class: "group-drag-handle",
-      text: "⋮⋮",
+      text: "⠿",
       draggable: appState.groupLayoutBusy ? "false" : "true",
       role: "button",
       tabindex: "0",
-      title: "移动小组区域",
-      "aria-label": `移动${group.name}区域`,
+      title: "拖拽与其他小组交换位置",
+      "aria-label": `拖拽${group.name}与其他小组交换位置`,
     });
     dragHandle.addEventListener("dragstart", (event) => {
       if (appState.groupLayoutBusy) {
@@ -1534,7 +1632,10 @@ function createGroupZone(group, { interactive = false, pickedIds = new Set(), ra
       event.dataTransfer.setData("text/plain", `group:${groupId}`);
       requestAnimationFrame(() => zone.classList.add("is-dragging"));
     });
-    dragHandle.addEventListener("dragend", () => zone.classList.remove("is-dragging"));
+    dragHandle.addEventListener("dragend", () => {
+      zone.classList.remove("is-dragging");
+      document.querySelectorAll(".seat-group.is-group-target").forEach((item) => item.classList.remove("is-group-target"));
+    });
     dragHandle.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -1553,27 +1654,7 @@ function createGroupZone(group, { interactive = false, pickedIds = new Set(), ra
   ]));
 
   if (interactive) {
-    const layoutGroups = orderedGroups();
-    const layoutIndex = layoutGroups.findIndex((item) => Number(item.id) === groupId);
     headingItems.push(el("div", { class: "seat-group-actions" }, [
-      el("button", {
-        class: "icon-button seat-order-button",
-        type: "button",
-        text: "←",
-        title: "向前移动小组",
-        "aria-label": `向前移动${group.name}`,
-        disabled: layoutIndex > 0 && !appState.groupLayoutBusy ? null : "",
-        onclick: () => shiftGroupInLayout(groupId, -1),
-      }),
-      el("button", {
-        class: "icon-button seat-order-button",
-        type: "button",
-        text: "→",
-        title: "向后移动小组",
-        "aria-label": `向后移动${group.name}`,
-        disabled: layoutIndex < layoutGroups.length - 1 && !appState.groupLayoutBusy ? null : "",
-        onclick: () => shiftGroupInLayout(groupId, 1),
-      }),
       el("button", {
         class: "btn btn-small",
         type: "button",
@@ -1635,7 +1716,8 @@ function createGroupZone(group, { interactive = false, pickedIds = new Set(), ra
       if (!movingId || movingId === groupId) return;
       event.preventDefault();
       event.stopPropagation();
-      moveGroupInLayout(movingId, groupId);
+      zone.classList.remove("is-group-target");
+      swapGroupInLayout(movingId, groupId);
     });
   }
   return zone;
@@ -1655,20 +1737,7 @@ function createClassroom({ interactive = false, rollcall = false } = {}) {
       : [el("div", { class: "classroom-empty" }, [el("strong", { text: "还没有小组区域" }), el("span", { text: "新增小组后，区域会出现在这里。" })])]),
   ]);
 
-  if (interactive) {
-    groupGrid.addEventListener("dragover", (event) => {
-      if ([...(event.dataTransfer?.types || [])].includes("application/x-cms-group")) event.preventDefault();
-    });
-    groupGrid.addEventListener("drop", (event) => {
-      if (appState.groupLayoutBusy) return;
-      const movingId = Number(event.dataTransfer?.getData("application/x-cms-group") || 0);
-      if (!movingId) return;
-      event.preventDefault();
-      moveGroupInLayout(movingId);
-    });
-  }
-
-  const unassigned = (appState.students.items || []).filter((student) => !Number(student.groupId || 0));
+  const unassigned = orderedSeatStudents(0);
   const unassignedSeats = el("div", { class: "unassigned-seats" }, unassigned.length
     ? unassigned.map((student) => makeStudentSeat(student, { interactive, pickedIds }))
     : [el("div", { class: "seat-zone-empty", text: "全部学生已分组" })]);

@@ -42,17 +42,23 @@ type (
 		Position  string `json:"position,optional"`
 		GroupId   int64  `json:"groupId,optional"`
 	}
+	StudentSeatMoveReq {
+		StudentId       int64 `json:"studentId"`
+		GroupId         int64 `json:"groupId"`
+		TargetStudentId int64 `json:"targetStudentId,optional"`
+	}
 	StudentResp {
-		Id         int64  `json:"id"`
-		StudentNo  string `json:"studentNo"`
-		Name       string `json:"name"`
-		Gender     string `json:"gender"`
-		Phone      string `json:"phone"`
-		Position   string `json:"position"`
-		GroupId    int64  `json:"groupId"`
-		TotalScore int64  `json:"totalScore"`
-		CreatedAt  int64  `json:"createdAt"`
-		UpdatedAt  int64  `json:"updatedAt"`
+		Id           int64  `json:"id"`
+		StudentNo    string `json:"studentNo"`
+		Name         string `json:"name"`
+		Gender       string `json:"gender"`
+		Phone        string `json:"phone"`
+		Position     string `json:"position"`
+		GroupId      int64  `json:"groupId"`
+		SeatPosition int64  `json:"seatPosition"`
+		TotalScore   int64  `json:"totalScore"`
+		CreatedAt    int64  `json:"createdAt"`
+		UpdatedAt    int64  `json:"updatedAt"`
 	}
 	StudentListReq {
 		PageReq
@@ -248,6 +254,9 @@ service cms-api {
 
 	@handler StudentList
 	get /students (StudentListReq) returns (StudentListResp)
+
+	@handler StudentSeatMove
+	put /students/seat (StudentSeatMoveReq) returns (Empty)
 
 	@handler StudentGet
 	get /students/:id returns (StudentResp)

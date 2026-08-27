@@ -28,4 +28,7 @@ func main() {
 	if err := db.NormalizeGroupLayoutPositions(context.Background(), gdb); err != nil {
 		panic(err)
 	}
+	if err := db.NormalizeStudentSeatPositions(context.Background(), gdb); err != nil {
+		panic(err)
+	}
 }

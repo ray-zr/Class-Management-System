@@ -102,7 +102,10 @@ func (r *GroupRepo) Delete(ctx context.Context, id int64) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, id).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&model.Student{}).Where("group_id = ?", id).Update("group_id", 0).Error; err != nil {
+		if err := tx.Model(&model.Student{}).Where("group_id = ?", id).Updates(map[string]any{"group_id": 0, "seat_position": 0}).Error; err != nil {
+			return err
+		}
+		if err := normalizeStudentSeatGroup(tx, 0); err != nil {
 			return err
 		}
 		if err := tx.Delete(&group).Error; err != nil {

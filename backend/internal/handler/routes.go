@@ -179,6 +179,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Path:    "/students/import",
 				Handler: StudentImportHandler(serverCtx),
 			},
+			{
+				Method:  http.MethodPut,
+				Path:    "/students/seat",
+				Handler: StudentSeatMoveHandler(serverCtx),
+			},
 		},
 		rest.WithPrefix("/api"),
 	)

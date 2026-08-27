@@ -1416,6 +1416,7 @@ input[type="checkbox"] {
 .seat-group.is-group-target {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.16), 0 9px 22px rgba(42, 57, 52, 0.12);
+  transform: translateY(-2px);
 }
 
 .seat-group-header {
@@ -1447,6 +1448,11 @@ input[type="checkbox"] {
 .group-drag-handle:hover {
   color: var(--text);
   background: var(--surface-secondary);
+}
+
+.group-drag-handle:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .group-drag-handle:active {
@@ -1545,18 +1551,6 @@ input[type="checkbox"] {
   gap: 6px;
 }
 
-.seat-order-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  font-size: 15px;
-}
-
-.seat-order-button:disabled {
-  cursor: default;
-  opacity: 0.35;
-}
-
 .seat-grid,
 .unassigned-seats {
   display: grid;
@@ -1633,6 +1627,14 @@ input[type="checkbox"] {
 
 .seat-student.is-dragging {
   opacity: 0.35;
+}
+
+.seat-student.is-seat-target {
+  z-index: 1;
+  border-color: var(--blue);
+  background: #eaf4ff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2), 0 5px 12px rgba(0, 89, 184, 0.14);
+  transform: translateY(-2px) scale(1.02);
 }
 
 .seat-student.is-picked {

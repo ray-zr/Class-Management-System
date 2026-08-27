@@ -233,16 +233,23 @@ type StudentRankResp struct {
 }
 
 type StudentResp struct {
-	Id         int64  `json:"id"`
-	StudentNo  string `json:"studentNo"`
-	Name       string `json:"name"`
-	Gender     string `json:"gender"`
-	Phone      string `json:"phone"`
-	Position   string `json:"position"`
-	GroupId    int64  `json:"groupId"`
-	TotalScore int64  `json:"totalScore"`
-	CreatedAt  int64  `json:"createdAt"`
-	UpdatedAt  int64  `json:"updatedAt"`
+	Id           int64  `json:"id"`
+	StudentNo    string `json:"studentNo"`
+	Name         string `json:"name"`
+	Gender       string `json:"gender"`
+	Phone        string `json:"phone"`
+	Position     string `json:"position"`
+	GroupId      int64  `json:"groupId"`
+	SeatPosition int64  `json:"seatPosition"`
+	TotalScore   int64  `json:"totalScore"`
+	CreatedAt    int64  `json:"createdAt"`
+	UpdatedAt    int64  `json:"updatedAt"`
+}
+
+type StudentSeatMoveReq struct {
+	StudentId       int64 `json:"studentId"`
+	GroupId         int64 `json:"groupId"`
+	TargetStudentId int64 `json:"targetStudentId,optional"`
 }
 
 type StudentUpdateReq struct {

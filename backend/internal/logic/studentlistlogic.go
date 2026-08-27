@@ -55,16 +55,17 @@ func (l *StudentListLogic) StudentList(req *types.StudentListReq) (resp *types.S
 	respItems := make([]types.StudentResp, 0, len(items))
 	for _, s := range items {
 		respItems = append(respItems, types.StudentResp{
-			Id:         s.ID,
-			StudentNo:  s.StudentNo,
-			Name:       s.Name,
-			Gender:     s.Gender,
-			Phone:      s.Phone,
-			Position:   s.Position,
-			GroupId:    s.GroupID,
-			TotalScore: s.TotalScore,
-			CreatedAt:  s.CreatedAt.Unix(),
-			UpdatedAt:  s.UpdatedAt.Unix(),
+			Id:           s.ID,
+			StudentNo:    s.StudentNo,
+			Name:         s.Name,
+			Gender:       s.Gender,
+			Phone:        s.Phone,
+			Position:     s.Position,
+			GroupId:      s.GroupID,
+			SeatPosition: s.SeatPosition,
+			TotalScore:   s.TotalScore,
+			CreatedAt:    s.CreatedAt.Unix(),
+			UpdatedAt:    s.UpdatedAt.Unix(),
 		})
 	}
 	return &types.StudentListResp{Total: total, Items: respItems}, nil

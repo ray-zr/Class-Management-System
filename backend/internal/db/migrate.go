@@ -66,6 +66,35 @@ func NormalizeGroupLayoutPositions(ctx context.Context, gdb *gorm.DB) error {
 	})
 }
 
+func NormalizeStudentSeatPositions(ctx context.Context, gdb *gorm.DB) error {
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var groupIDs []int64
+		if err := tx.Model(&model.Student{}).Distinct("group_id").Order("group_id asc").Pluck("group_id", &groupIDs).Error; err != nil {
+			return err
+		}
+		for _, groupID := range groupIDs {
+			var students []model.Student
+			if err := tx.Where("group_id = ?", groupID).
+				Order("CASE WHEN seat_position > 0 THEN 0 ELSE 1 END").
+				Order("seat_position asc").
+				Order("id asc").
+				Find(&students).Error; err != nil {
+				return err
+			}
+			for index, student := range students {
+				position := int64(index + 1)
+				if student.SeatPosition == position {
+					continue
+				}
+				if err := tx.Model(&model.Student{}).Where("id = ?", student.ID).Update("seat_position", position).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
 func BackfillScoreEntrySnapshots(ctx context.Context, gdb *gorm.DB) error {
 	return gdb.WithContext(ctx).Exec(`
 		UPDATE score_entries e

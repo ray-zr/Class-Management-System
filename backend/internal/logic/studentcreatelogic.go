@@ -50,15 +50,16 @@ func (l *StudentCreateLogic) StudentCreate(req *types.StudentCreateReq) (resp *t
 		return nil, err
 	}
 	return &types.StudentResp{
-		Id:         s.ID,
-		StudentNo:  s.StudentNo,
-		Name:       s.Name,
-		Gender:     s.Gender,
-		Phone:      s.Phone,
-		Position:   s.Position,
-		GroupId:    s.GroupID,
-		TotalScore: s.TotalScore,
-		CreatedAt:  s.CreatedAt.Unix(),
-		UpdatedAt:  s.UpdatedAt.Unix(),
+		Id:           s.ID,
+		StudentNo:    s.StudentNo,
+		Name:         s.Name,
+		Gender:       s.Gender,
+		Phone:        s.Phone,
+		Position:     s.Position,
+		GroupId:      s.GroupID,
+		SeatPosition: s.SeatPosition,
+		TotalScore:   s.TotalScore,
+		CreatedAt:    s.CreatedAt.Unix(),
+		UpdatedAt:    s.UpdatedAt.Unix(),
 	}, nil
 }
