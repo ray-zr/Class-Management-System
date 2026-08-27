@@ -140,8 +140,11 @@ const appState = {
   operationLogsQuery: { page: 1, size: 20, studentId: 0, groupId: 0, ...defaultOperationLogRange() },
   operationLogsStudentKeyword: "",
   rollcallPickCount: 1,
+  rollcallFair: false,
   rollcall: { roundId: "", students: [], remaining: 0 },
-  groupsStudentKeyword: "",
+  selectedSeatStudentId: 0,
+  seatAssignmentBusy: false,
+  groupLayoutBusy: false,
   timers: [createTimerState(5, 0), createTimerState(5, 0)],
 };
 
@@ -333,12 +336,86 @@ async function groupDelete(id) {
   await apiFetch(`/groups/${id}`, { method: "DELETE" });
 }
 
+async function groupLayoutUpdate(items) {
+  await apiFetch("/groups/layout", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+}
+
 async function studentAssignGroup(studentId, groupId) {
   await apiFetch(`/students/${studentId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ groupId }),
   });
+}
+
+function orderedGroups() {
+  return [...(appState.groups || [])].sort((a, b) => {
+    const aPosition = Number(a.layoutPosition || Number.MAX_SAFE_INTEGER);
+    const bPosition = Number(b.layoutPosition || Number.MAX_SAFE_INTEGER);
+    return aPosition - bPosition || Number(a.id) - Number(b.id);
+  });
+}
+
+function moveGroupInLayout(movingId, targetId = 0) {
+  if (appState.groupLayoutBusy) return;
+  const ids = orderedGroups().map((group) => Number(group.id));
+  const from = ids.indexOf(Number(movingId));
+  if (from < 0) return;
+  const [moving] = ids.splice(from, 1);
+  const to = targetId ? ids.indexOf(Number(targetId)) : -1;
+  if (to < 0) ids.push(moving);
+  else ids.splice(to, 0, moving);
+  persistGroupLayout(ids);
+}
+
+async function persistGroupLayout(ids) {
+  if (appState.groupLayoutBusy) return;
+  appState.groupLayoutBusy = true;
+  const previous = new Map((appState.groups || []).map((group) => [Number(group.id), Number(group.layoutPosition || 0)]));
+  ids.forEach((id, index) => {
+    const group = (appState.groups || []).find((item) => Number(item.id) === Number(id));
+    if (group) group.layoutPosition = index + 1;
+  });
+  render();
+  try {
+    await groupLayoutUpdate(ids.map((id, index) => ({ id, position: index + 1 })));
+    await loadGroups();
+    toast("座位布局已保存");
+  } catch (error) {
+    for (const group of appState.groups || []) group.layoutPosition = previous.get(Number(group.id)) || 0;
+    try {
+      await loadGroups();
+    } catch {
+    }
+    toast(String(error.message || error));
+  } finally {
+    appState.groupLayoutBusy = false;
+    render();
+  }
+}
+
+function shiftGroupInLayout(groupId, offset) {
+  const groups = orderedGroups();
+  const index = groups.findIndex((group) => Number(group.id) === Number(groupId));
+  const nextIndex = index + offset;
+  if (index < 0 || nextIndex < 0 || nextIndex >= groups.length) return;
+  moveGroupInLayout(groupId, offset < 0 ? groups[nextIndex].id : groups[nextIndex + 1]?.id || 0);
+}
+
+function groupRankMap() {
+  const ranked = [...(appState.groups || [])].sort((a, b) => {
+    return Number(b.avgScore || 0) - Number(a.avgScore || 0) || Number(a.id) - Number(b.id);
+  });
+  return new Map(ranked.slice(0, 3).map((group, index) => [Number(group.id), index + 1]));
+}
+
+function formatGroupScore(value) {
+  const score = Number(value || 0);
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
 async function dimensionCreate(name) {
@@ -672,6 +749,9 @@ function shell(title, content) {
       await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
     }
     if (routeKey === "groups") {
+      await Promise.all([loadStudentsForPickers(), loadGroups()]);
+    }
+    if (routeKey === "rollcall") {
       await Promise.all([loadStudentsForPickers(), loadGroups()]);
     }
     if (routeKey === "config") {
@@ -1286,246 +1366,513 @@ function viewScore() {
   return shell("积分录入", content);
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function assignSeatStudent(studentId, groupId) {
+  if (appState.seatAssignmentBusy) return;
+  const student = (appState.students.items || []).find((item) => Number(item.id) === Number(studentId));
+  if (!student) return;
+  if (Number(student.groupId || 0) === Number(groupId || 0)) {
+    appState.selectedSeatStudentId = 0;
+    render();
+    return;
+  }
+
+  const previousGroupId = Number(student.groupId || 0);
+  appState.seatAssignmentBusy = true;
+  appState.selectedSeatStudentId = 0;
+  student.groupId = Number(groupId || 0);
+  render();
+  try {
+    await studentAssignGroup(student.id, Number(groupId || 0));
+    await loadGroups();
+    toast(`已将${student.name}移至${groupNameById(groupId)}`);
+  } catch (error) {
+    student.groupId = previousGroupId;
+    try {
+      await Promise.all([loadStudentsForPickers(), loadGroups()]);
+    } catch {
+    }
+    toast(String(error.message || error));
+  } finally {
+    appState.seatAssignmentBusy = false;
+    render();
+  }
+}
+
+function readDraggedStudentId(event) {
+  const custom = event.dataTransfer?.getData("application/x-cms-student");
+  if (custom) return Number(custom);
+  const fallback = event.dataTransfer?.getData("text/plain") || "";
+  return fallback.startsWith("student:") ? Number(fallback.slice(8)) : 0;
+}
+
+function makeStudentSeat(student, { interactive = false, pickedIds = new Set() } = {}) {
+  const selected = Number(appState.selectedSeatStudentId) === Number(student.id);
+  const picked = pickedIds.has(Number(student.id));
+  const seat = el("button", {
+    class: `seat-student${selected ? " is-selected" : ""}${picked ? " is-picked" : ""}`,
+    type: "button",
+    draggable: interactive ? "true" : "false",
+    "data-student-id": student.id,
+    "aria-pressed": interactive ? String(selected) : null,
+    title: interactive ? `移动${student.name}` : `${student.name}，${student.studentNo}`,
+  }, [
+    el("strong", { text: student.name || "未命名" }),
+    el("span", { text: `ID ${student.studentNo || student.id}` }),
+  ]);
+
+  if (interactive) {
+    seat.addEventListener("click", (event) => {
+      event.stopPropagation();
+      appState.selectedSeatStudentId = selected ? 0 : Number(student.id);
+      render();
+    });
+    seat.addEventListener("dragstart", (event) => {
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-cms-student", String(student.id));
+      event.dataTransfer.setData("text/plain", `student:${student.id}`);
+      requestAnimationFrame(() => seat.classList.add("is-dragging"));
+    });
+    seat.addEventListener("dragend", () => seat.classList.remove("is-dragging"));
+  }
+  return seat;
+}
+
+function bindStudentDropZone(node, groupId) {
+  node.addEventListener("dragover", (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes("application/x-cms-student")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    node.classList.add("is-drop-target");
+  });
+  node.addEventListener("dragleave", (event) => {
+    if (!node.contains(event.relatedTarget)) node.classList.remove("is-drop-target");
+  });
+  node.addEventListener("drop", (event) => {
+    const studentId = readDraggedStudentId(event);
+    if (!studentId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    node.classList.remove("is-drop-target");
+    assignSeatStudent(studentId, groupId);
+  });
+  node.addEventListener("click", (event) => {
+    if (!appState.selectedSeatStudentId || event.target.closest("button, input")) return;
+    assignSeatStudent(appState.selectedSeatStudentId, groupId);
+  });
+}
+
+function requestGroupDelete(group) {
+  return new Promise((resolve) => {
+    const dialog = el("dialog", { class: "revoke-dialog group-delete-dialog", "aria-labelledby": "group-delete-title" });
+    const close = (answer) => {
+      dialog.close();
+      dialog.remove();
+      resolve(answer);
+    };
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close(false);
+    });
+    dialog.appendChild(el("div", { class: "revoke-form" }, [
+      el("div", { class: "dialog-heading" }, [
+        el("div", {}, [
+          el("p", { class: "dialog-eyebrow", text: "删除小组" }),
+          el("h2", { id: "group-delete-title", text: group.name }),
+        ]),
+        el("button", { class: "icon-button", type: "button", text: "×", title: "关闭", "aria-label": "关闭", onclick: () => close(false) }),
+      ]),
+      el("p", { class: "group-delete-copy", text: "该区域会从座位表移除，组内学生将回到未分组区。" }),
+      el("div", { class: "dialog-actions" }, [
+        el("button", { class: "btn", type: "button", text: "取消", onclick: () => close(false) }),
+        el("button", { class: "btn btn-danger", type: "button", text: "确认删除", onclick: () => close(true) }),
+      ]),
+    ]));
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  });
+}
+
+function createGroupZone(group, { interactive = false, pickedIds = new Set(), ranks = new Map() } = {}) {
+  const groupId = Number(group.id);
+  const rank = ranks.get(groupId) || 0;
+  const students = (appState.students.items || []).filter((student) => Number(student.groupId || 0) === groupId);
+  const zone = el("section", {
+    class: `seat-group${interactive ? " is-editable" : ""}${rank ? ` seat-group-rank-${rank}` : ""}`,
+    "data-group-id": group.id,
+    "aria-label": `${group.name}，${students.length}人`,
+  });
+
+  const title = interactive
+    ? el("input", { class: "seat-group-name-input", type: "text", value: group.name, maxlength: "50", "aria-label": `${group.name}名称` })
+    : el("h3", { text: group.name });
+  const score = Number(group.avgScore || 0);
+  const rankLabels = ["", "冠", "亚", "季"];
+  const headingItems = [];
+
+  if (interactive) {
+    const dragHandle = el("span", {
+      class: "group-drag-handle",
+      text: "⋮⋮",
+      draggable: appState.groupLayoutBusy ? "false" : "true",
+      role: "button",
+      tabindex: "0",
+      title: "移动小组区域",
+      "aria-label": `移动${group.name}区域`,
+    });
+    dragHandle.addEventListener("dragstart", (event) => {
+      if (appState.groupLayoutBusy) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-cms-group", String(groupId));
+      event.dataTransfer.setData("text/plain", `group:${groupId}`);
+      requestAnimationFrame(() => zone.classList.add("is-dragging"));
+    });
+    dragHandle.addEventListener("dragend", () => zone.classList.remove("is-dragging"));
+    dragHandle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      shiftGroupInLayout(groupId, event.key === "ArrowLeft" ? -1 : 1);
+    });
+    headingItems.push(dragHandle);
+  }
+
+  headingItems.push(rank
+    ? el("span", { class: `group-rank group-rank-${rank}`, text: rankLabels[rank], title: `小组第${rank}名` })
+    : el("span", { class: "group-rank group-rank-placeholder", "aria-hidden": "true" }));
+  headingItems.push(el("div", { class: "seat-group-title" }, [title, el("span", { text: `${students.length} 人` })]));
+  headingItems.push(el("div", { class: score >= 0 ? "group-average is-positive" : "group-average is-negative" }, [
+    el("span", { text: "平均分" }),
+    el("strong", { text: formatGroupScore(score) }),
+  ]));
+
+  if (interactive) {
+    const layoutGroups = orderedGroups();
+    const layoutIndex = layoutGroups.findIndex((item) => Number(item.id) === groupId);
+    headingItems.push(el("div", { class: "seat-group-actions" }, [
+      el("button", {
+        class: "icon-button seat-order-button",
+        type: "button",
+        text: "←",
+        title: "向前移动小组",
+        "aria-label": `向前移动${group.name}`,
+        disabled: layoutIndex > 0 && !appState.groupLayoutBusy ? null : "",
+        onclick: () => shiftGroupInLayout(groupId, -1),
+      }),
+      el("button", {
+        class: "icon-button seat-order-button",
+        type: "button",
+        text: "→",
+        title: "向后移动小组",
+        "aria-label": `向后移动${group.name}`,
+        disabled: layoutIndex < layoutGroups.length - 1 && !appState.groupLayoutBusy ? null : "",
+        onclick: () => shiftGroupInLayout(groupId, 1),
+      }),
+      el("button", {
+        class: "btn btn-small",
+        type: "button",
+        text: "保存",
+        onclick: async () => {
+          try {
+            const value = title.value.trim();
+            if (!value) throw new Error("名称不能为空");
+            if (value !== group.name) await groupUpdate(group.id, value);
+            await loadGroups();
+            toast("小组名称已保存");
+            render();
+          } catch (error) {
+            toast(String(error.message || error));
+          }
+        },
+      }),
+      el("button", {
+        class: "btn btn-small btn-danger",
+        type: "button",
+        text: "删除",
+        onclick: async () => {
+          if (!(await requestGroupDelete(group))) return;
+          try {
+            await groupDelete(group.id);
+            await Promise.all([loadStudentsForPickers(), loadGroups()]);
+            toast("小组已删除");
+            render();
+          } catch (error) {
+            toast(String(error.message || error));
+          }
+        },
+      }),
+    ]));
+  }
+
+  const seats = el("div", { class: "seat-grid" }, students.length
+    ? students.map((student) => makeStudentSeat(student, { interactive, pickedIds }))
+    : [el("div", { class: "seat-zone-empty", text: "暂无学生" })]);
+  if (interactive) bindStudentDropZone(seats, groupId);
+  zone.append(el("header", { class: "seat-group-header" }, headingItems), seats);
+
+  if (interactive) {
+    zone.addEventListener("click", (event) => {
+      if (!appState.selectedSeatStudentId || event.target.closest("button, input, .group-drag-handle")) return;
+      assignSeatStudent(appState.selectedSeatStudentId, groupId);
+    });
+    zone.addEventListener("dragover", (event) => {
+      if (![...(event.dataTransfer?.types || [])].includes("application/x-cms-group")) return;
+      event.preventDefault();
+      zone.classList.add("is-group-target");
+    });
+    zone.addEventListener("dragleave", (event) => {
+      if (!zone.contains(event.relatedTarget)) zone.classList.remove("is-group-target");
+    });
+    zone.addEventListener("drop", (event) => {
+      if (appState.groupLayoutBusy) return;
+      const movingId = Number(event.dataTransfer?.getData("application/x-cms-group") || 0);
+      if (!movingId || movingId === groupId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      moveGroupInLayout(movingId, groupId);
+    });
+  }
+  return zone;
+}
+
+function createClassroom({ interactive = false, rollcall = false } = {}) {
+  const pickedIds = new Set((appState.rollcall.students || []).map((student) => Number(student.id)));
+  const ranks = groupRankMap();
+  const groups = orderedGroups();
+  const columnRuler = el("div", { class: "seat-column-ruler", "aria-hidden": "true" },
+    Array.from({ length: 8 }, (_, index) => el("span", { text: pad2(index + 1) }))
+  );
+  const groupGrid = el("div", { class: "seat-group-grid" }, [
+    columnRuler,
+    ...(groups.length
+      ? groups.map((group) => createGroupZone(group, { interactive, pickedIds, ranks }))
+      : [el("div", { class: "classroom-empty" }, [el("strong", { text: "还没有小组区域" }), el("span", { text: "新增小组后，区域会出现在这里。" })])]),
+  ]);
+
+  if (interactive) {
+    groupGrid.addEventListener("dragover", (event) => {
+      if ([...(event.dataTransfer?.types || [])].includes("application/x-cms-group")) event.preventDefault();
+    });
+    groupGrid.addEventListener("drop", (event) => {
+      if (appState.groupLayoutBusy) return;
+      const movingId = Number(event.dataTransfer?.getData("application/x-cms-group") || 0);
+      if (!movingId) return;
+      event.preventDefault();
+      moveGroupInLayout(movingId);
+    });
+  }
+
+  const unassigned = (appState.students.items || []).filter((student) => !Number(student.groupId || 0));
+  const unassignedSeats = el("div", { class: "unassigned-seats" }, unassigned.length
+    ? unassigned.map((student) => makeStudentSeat(student, { interactive, pickedIds }))
+    : [el("div", { class: "seat-zone-empty", text: "全部学生已分组" })]);
+  if (interactive) bindStudentDropZone(unassignedSeats, 0);
+
+  const unassignedZone = el("aside", { class: "unassigned-zone", "aria-label": `未分组学生，${unassigned.length}人` }, [
+    el("header", {}, [el("div", {}, [el("h3", { text: "未分组" }), el("span", { text: `${unassigned.length} 人` })])]),
+    unassignedSeats,
+  ]);
+  if (interactive) {
+    unassignedZone.addEventListener("click", (event) => {
+      if (!appState.selectedSeatStudentId || event.target.closest("button, input")) return;
+      assignSeatStudent(appState.selectedSeatStudentId, 0);
+    });
+  }
+
+  return el("section", { class: `classroom${rollcall ? " rollcall-classroom" : ""}`, "aria-label": "课室座位表" }, [
+    el("div", { class: "classroom-canvas" }, [
+      el("div", { class: "classroom-layout" }, [groupGrid, unassignedZone]),
+      el("div", { class: "classroom-front" }, [
+        el("div", { class: "classroom-board-mark", text: rollcall ? "RANDOM CALL" : "CLASSROOM" }),
+        el("div", { class: "classroom-podium" }, [
+          el("span", { text: "讲台" }),
+          rollcall ? el("strong", { class: "rollcall-stage-status", text: appState.rollcall.roundId ? `本轮剩余 ${appState.rollcall.remaining} 人` : "准备点名" }) : null,
+        ]),
+      ]),
+    ]),
+  ]);
+}
+
+async function goToStudentScore(student) {
+  appState.scoreDraft = { scope: "student", targetId: student.id };
+  appState.route = "score";
+  try {
+    await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
+  } catch (error) {
+    toast(String(error.message || error));
+  }
+  render();
+}
+
+function showRollcallResult(students) {
+  if (!students.length) return;
+  document.querySelector(".rollcall-result-dialog")?.remove();
+  const dialog = el("dialog", { class: "rollcall-result-dialog", "aria-labelledby": "rollcall-result-title" });
+  const close = () => {
+    dialog.close();
+    dialog.remove();
+  };
+  const title = students.length === 1 ? students[0].name : `点到 ${students.length} 位同学`;
+  const cards = students.map((student) => el("article", { class: "rollcall-winner" }, [
+    el("div", { class: "winner-initial", text: String(student.name || "?").slice(-1) }),
+    el("div", { class: "winner-info" }, [
+      el("strong", { text: student.name }),
+      el("span", { text: `学号 ${student.studentNo || "-"}` }),
+      el("span", { text: `${groupNameById(student.groupId)}${student.position ? ` · ${student.position}` : ""}` }),
+    ]),
+    el("button", { class: "btn btn-small btn-amber", type: "button", text: "录入积分", onclick: () => { close(); goToStudentScore(student); } }),
+  ]));
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    close();
+  });
+  dialog.appendChild(el("div", { class: "rollcall-result-panel" }, [
+    el("div", { class: "celebration-bars", "aria-hidden": "true" }, Array.from({ length: 8 }, (_, index) => el("i", { class: `bar-${index + 1}` }))),
+    el("div", { class: "dialog-heading rollcall-result-heading" }, [
+      el("div", {}, [el("p", { class: "dialog-eyebrow", text: "本次点名" }), el("h2", { id: "rollcall-result-title", text: title })]),
+      el("button", { class: "icon-button", type: "button", text: "×", title: "关闭", "aria-label": "关闭", onclick: close }),
+    ]),
+    el("div", { class: "rollcall-winners" }, cards),
+    el("div", { class: "dialog-actions" }, [el("button", { class: "btn btn-amber", type: "button", text: "回到座位表", onclick: close })]),
+  ]));
+  document.body.appendChild(dialog);
+  dialog.showModal();
+}
+
+async function animateRollcall(students) {
+  const seats = [...document.querySelectorAll(".rollcall-classroom .seat-student")];
+  const status = document.querySelector(".rollcall-stage-status");
+  if (!seats.length || !students.length || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  document.querySelector(".rollcall-classroom")?.classList.add("is-drawing");
+  let active = null;
+  const rounds = Math.min(30, 16 + seats.length);
+  for (let index = 0; index < rounds; index += 1) {
+    active?.classList.remove("is-chasing");
+    active = seats[Math.floor(Math.random() * seats.length)];
+    active.classList.add("is-chasing");
+    if (status) status.textContent = index % 2 ? "正在寻找..." : "座位扫描中...";
+    await wait(42 + index * 5);
+  }
+  active?.classList.remove("is-chasing");
+  for (const student of students) {
+    const winner = seats.find((seat) => Number(seat.dataset.studentId) === Number(student.id));
+    winner?.classList.add("is-final");
+    if (status) status.textContent = student.name;
+    await wait(360);
+  }
+  await wait(260);
+}
+
+async function performRollcall(kind, fair) {
+  const actions = [...document.querySelectorAll(".rollcall-action")];
+  actions.forEach((button) => { button.disabled = true; });
+  try {
+    if (kind === "start") {
+      await loadStudentsForPickers();
+      await rollcallStart(fair);
+    } else {
+      await rollcallPick();
+    }
+    const students = [...(appState.rollcall.students || [])];
+    await animateRollcall(students);
+    render();
+    showRollcallResult(students);
+  } catch (error) {
+    toast(String(error.message || error));
+    actions.forEach((button) => { button.disabled = false; });
+  }
+}
+
 function viewRollcall() {
-  const fair = el("input", { type: "checkbox" });
-  const pickCount = el("input", { type: "number", min: "1", max: "50", step: "1", placeholder: "1" });
+  const fair = el("input", { type: "checkbox", id: "rollcall-fair" });
+  fair.checked = !!appState.rollcallFair;
+  fair.addEventListener("change", () => { appState.rollcallFair = fair.checked; });
+  const pickCount = el("input", { type: "number", min: "1", max: "50", step: "1", "aria-label": "点名人数" });
   pickCount.value = String(appState.rollcallPickCount || 1);
-  pickCount.addEventListener("change", () => {
-    const v = Math.max(1, Math.min(50, Math.floor(Number(pickCount.value || 1))));
-    appState.rollcallPickCount = v;
-    pickCount.value = String(v);
-  });
-  const start = el("button", {
-    class: "btn btn-amber",
-    text: "开始（并点名一次）",
-    onclick: async () => {
-      try {
-        await loadStudentsForPickers();
-        await rollcallStart(fair.checked);
-        render();
-      } catch (e) {
-        toast(String(e.message || e));
-      }
-    },
-  });
-  const pick = el("button", {
-    class: "btn",
-    text: "再点一次",
-    onclick: async () => {
-      try {
-        await rollcallPick();
-        render();
-      } catch (e) {
-        toast(String(e.message || e));
-      }
-    },
-  });
+  const syncPickCount = () => {
+    const value = Math.max(1, Math.min(50, Math.floor(Number(pickCount.value || 1))));
+    appState.rollcallPickCount = value;
+    pickCount.value = String(value);
+    return value;
+  };
+  pickCount.addEventListener("input", syncPickCount);
+  pickCount.addEventListener("change", syncPickCount);
+  const hasRound = !!appState.rollcall.roundId;
+  const canContinue = hasRound && !(appState.rollcallFair && Number(appState.rollcall.remaining) === 0);
+  const start = el("button", { class: "btn btn-amber rollcall-action", type: "button", text: hasRound ? "开始新一轮" : "开始点名", onclick: () => { syncPickCount(); performRollcall("start", fair.checked); } });
+  const pick = el("button", { class: "btn rollcall-action", type: "button", text: "继续点名", disabled: canContinue ? null : "", onclick: () => { syncPickCount(); performRollcall("pick", fair.checked); } });
   const reset = el("button", {
-    class: "btn",
+    class: "btn rollcall-action",
+    type: "button",
     text: "重置本轮",
+    disabled: hasRound ? null : "",
     onclick: async () => {
       try {
         await rollcallReset(appState.rollcall.roundId);
+        toast("本轮点名已重置");
         render();
-      } catch (e) {
-        toast(String(e.message || e));
+      } catch (error) {
+        toast(String(error.message || error));
       }
     },
   });
 
-  const sts = appState.rollcall.students || [];
-  const chosen = sts.length
-    ? el("div", { class: "grid" }, [
-        el("div", { class: "pill" }, [el("span", { text: `本次点到 ${sts.length} 人 · 剩余 ${appState.rollcall.remaining}` })]),
-        ...sts.map((st) => {
-          const jump = el("button", {
-            class: "btn btn-small btn-amber",
-            text: "给TA录入积分",
-            onclick: async () => {
-              appState.scoreDraft = { scope: "student", targetId: st.id };
-              appState.route = "score";
-              try {
-                await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
-              } catch (e) {
-                toast(String(e.message || e));
-              }
-              render();
-            },
-          });
-          return el("div", { class: "student-item" }, [
-            el("div", { class: "student-name" }, [
-              el("div", { class: "combo", text: `${st.studentNo} ${st.name}` }),
-              el("div", { class: "meta", text: st.position || "" }),
-            ]),
-            el("div", { class: "row" }, [jump]),
-          ]);
-        }),
-      ])
-    : el("div", { class: "pill" }, [el("span", { text: "尚未点名" })]);
-
-  const content = el("div", { class: "grid" }, [
-    el("div", { class: "card" }, [
-      el("h2", { text: "设置" }),
-      el("div", { class: "row" }, [
-        el("span", { class: "pill" }, [fair, el("span", { text: "公平模式" })]),
-        el("div", { class: "field" }, [el("label", { text: "点名人数" }), pickCount]),
+  const content = el("div", { class: "grid classroom-page rollcall-page" }, [
+    el("section", { class: "classroom-toolbar rollcall-toolbar" }, [
+      el("div", { class: "toolbar-summary" }, [
+        el("span", { class: "toolbar-kicker", text: hasRound ? "点名进行中" : "随机点名" }),
+        el("strong", { text: hasRound ? `还有 ${appState.rollcall.remaining} 人未点到` : `全班 ${appState.students.total || 0} 人` }),
+      ]),
+      el("div", { class: "rollcall-options" }, [
+        el("label", { class: "switch-control", for: "rollcall-fair" }, [fair, el("span", { text: "公平模式" })]),
+        el("label", { class: "count-control" }, [el("span", { text: "人数" }), pickCount]),
         start,
         pick,
         reset,
       ]),
     ]),
-    el("div", { class: "card" }, [
-      el("h2", { text: "本次结果" }),
-      chosen,
-    ]),
+    createClassroom({ rollcall: true }),
   ]);
-
   return shell("随机点名", content);
 }
 
 function viewGroups() {
-  const name = el("input", { type: "text", placeholder: "如：第一组" });
-  const create = el("button", {
-    class: "btn btn-amber",
-    text: "新增小组",
-    onclick: async () => {
+  const name = el("input", { type: "text", placeholder: "输入小组名称", maxlength: "50", "aria-label": "新小组名称" });
+  const create = el("button", { class: "btn btn-amber", type: "submit", text: "新增小组" });
+  const form = el("form", {
+    class: "group-create-form",
+    onsubmit: async (event) => {
+      event.preventDefault();
       try {
-        const v = (name.value || "").trim();
-        if (!v) throw new Error("请输入小组名称");
-        await groupCreate(v);
+        const value = name.value.trim();
+        if (!value) throw new Error("请输入小组名称");
+        await groupCreate(value);
         name.value = "";
-        toast("已创建");
         await loadGroups();
+        toast("小组已添加到座位表");
         render();
-      } catch (e) {
-        toast(String(e.message || e));
+      } catch (error) {
+        toast(String(error.message || error));
       }
     },
-  });
+  }, [name, create]);
 
-  const list = el(
-    "div",
-    { class: "list" },
-    (appState.groups || []).map((g) => {
-      const edit = el("input", { type: "text", value: g.name });
-      const save = el("button", {
-        class: "btn btn-small btn-amber",
-        text: "保存",
-        onclick: async () => {
-          try {
-            const v = (edit.value || "").trim();
-            if (!v) throw new Error("名称不能为空");
-            await groupUpdate(g.id, v);
-            toast("已保存");
-            await loadGroups();
-            render();
-          } catch (e) {
-            toast(String(e.message || e));
-          }
-        },
-      });
-      const del = el("button", {
-        class: "btn btn-small btn-danger",
-        text: "删除",
-        onclick: async () => {
-          try {
-            const ok = window.confirm(`确认删除小组「${g.name}」？`);
-            if (!ok) return;
-            await groupDelete(g.id);
-            toast("已删除");
-            await loadGroups();
-            render();
-          } catch (e) {
-            toast(String(e.message || e));
-          }
-        },
-      });
-
-      const avgScore = Number(g.avgScore || 0);
-      const avgScoreEl = el("div", { class: avgScore >= 0 ? "score pos" : "score neg", text: String(avgScore) });
-      return el("div", { class: "row entry-item" }, [
-        el("div", { class: "row", style: "flex:1" }, [
-          el("div", { class: "field" }, [el("label", { text: "小组名称" }), edit]),
-          el("div", { class: "row" }, [el("span", { class: "pill" }, [el("span", { text: "平均分" })]), avgScoreEl]),
-        ]),
-        save,
-        del,
-      ]);
-    })
-  );
-
-  const kw = el("input", { type: "text", placeholder: "搜索：姓名/学号", value: appState.groupsStudentKeyword || "" });
-  kw.addEventListener("input", () => {
-    appState.groupsStudentKeyword = (kw.value || "").trim();
-    render();
-  });
-
-  const keyword = (appState.groupsStudentKeyword || "").trim();
-  const keywordLower = keyword.toLowerCase();
-  const filteredStudents = (appState.students.items || []).filter((s) => {
-    if (!keywordLower) return true;
-    const name = String(s.name || "");
-    const no = String(s.studentNo || "");
-    return name.toLowerCase().includes(keywordLower) || no.toLowerCase().includes(keywordLower);
-  });
-
-  const studentList = el(
-    "div",
-    { class: "list" },
-    filteredStudents.map((s, idx) => {
-      const groupSel = el("select");
-      groupSel.appendChild(el("option", { value: "0", text: "未分组" }));
-      for (const g of appState.groups || []) {
-        groupSel.appendChild(el("option", { value: String(g.id), text: g.name }));
-      }
-      const current = String(s.groupId || 0);
-      if ([...groupSel.options].some((o) => o.value === current)) groupSel.value = current;
-
-      const save = el("button", {
-        class: "btn btn-small",
-        text: "保存分组",
-        onclick: async () => {
-          try {
-            const gid = Number(groupSel.value || 0);
-            await studentAssignGroup(s.id, gid);
-            toast("已更新");
-            await Promise.all([loadStudentsForPickers(), loadGroups()]);
-            render();
-          } catch (e) {
-            toast(String(e.message || e));
-          }
-        },
-      });
-
-      const n = pad2(idx + 1);
-
-      const combo = `${n} ${s.name}`;
-      return el("div", { class: "student-item" }, [
-        el("div", { class: "student-name" }, [
-          el("div", { class: "combo", text: combo }),
-          el("div", { class: "meta", text: `${s.studentNo} · 当前：${groupNameById(s.groupId)}` }),
-        ]),
-        el("div", { class: "row" }, [groupSel, save]),
-      ]);
-    })
-  );
-
-  const content = el("div", { class: "grid" }, [
-    el("div", { class: "card" }, [
-      el("h2", { text: "新增小组" }),
-      el("div", { class: "row" }, [name, create, el("span", { class: "muted", text: "（删除小组后，该组学生将自动变为未分组）" })]),
+  const content = el("div", { class: "grid classroom-page" }, [
+    el("section", { class: "classroom-toolbar" }, [
+      el("div", { class: "toolbar-summary" }, [
+        el("span", { class: "toolbar-kicker", text: "座位编排" }),
+        el("strong", { text: `${appState.groups.length} 个小组 · ${appState.students.total || 0} 名学生` }),
+      ]),
+      form,
     ]),
-    el("div", { class: "card" }, [
-      el("h2", { text: "小组列表" }),
-      list,
-    ]),
-    el("div", { class: "card" }, [
-      el("h2", { text: "学生分组" }),
-      el("div", { class: "row" }, [kw]),
-      studentList,
-    ]),
+    createClassroom({ interactive: true }),
   ]);
-
   return shell("小组管理", content);
 }
 
@@ -2454,6 +2801,9 @@ async function ensureDataForRoute() {
     await Promise.all([loadStudentsForPickers(), loadGroups(), loadDimensions(), loadScoreItems(), loadRecentScoreItems()]);
   }
   if (appState.route === "groups") {
+    await Promise.all([loadStudentsForPickers(), loadGroups()]);
+  }
+  if (appState.route === "rollcall") {
     await Promise.all([loadStudentsForPickers(), loadGroups()]);
   }
   if (appState.route === "config") {

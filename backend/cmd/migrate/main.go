@@ -25,4 +25,7 @@ func main() {
 	if err := db.AutoMigrate(context.Background(), gdb); err != nil {
 		panic(err)
 	}
+	if err := db.NormalizeGroupLayoutPositions(context.Background(), gdb); err != nil {
+		panic(err)
+	}
 }

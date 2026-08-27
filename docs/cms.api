@@ -70,12 +70,20 @@ type (
 	GroupUpdateReq {
 		Name string `json:"name"`
 	}
+	GroupLayoutItem {
+		Id       int64 `json:"id"`
+		Position int64 `json:"position"`
+	}
+	GroupLayoutUpdateReq {
+		Items []GroupLayoutItem `json:"items"`
+	}
 	GroupResp {
-		Id        int64   `json:"id"`
-		Name      string  `json:"name"`
-		AvgScore  float64 `json:"avgScore"`
-		CreatedAt int64   `json:"createdAt"`
-		UpdatedAt int64   `json:"updatedAt"`
+		Id             int64   `json:"id"`
+		Name           string  `json:"name"`
+		AvgScore       float64 `json:"avgScore"`
+		LayoutPosition int64   `json:"layoutPosition"`
+		CreatedAt      int64   `json:"createdAt"`
+		UpdatedAt      int64   `json:"updatedAt"`
 	}
 	GroupListResp {
 		Items []GroupResp `json:"items"`
@@ -259,6 +267,9 @@ service cms-api {
 
 	@handler GroupList
 	get /groups returns (GroupListResp)
+
+	@handler GroupLayoutUpdate
+	put /groups/layout (GroupLayoutUpdateReq) returns (Empty)
 
 	@handler GroupUpdate
 	put /groups/:id (GroupUpdateReq) returns (GroupResp)

@@ -37,7 +37,7 @@ func (l *GroupListLogic) GroupList() (resp *types.GroupListResp, err error) {
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: avg, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()})
+		items = append(items, types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: avg, LayoutPosition: g.LayoutPosition, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()})
 	}
 	return &types.GroupListResp{Items: items}, nil
 }

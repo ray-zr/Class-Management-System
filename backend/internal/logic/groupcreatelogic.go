@@ -40,5 +40,5 @@ func (l *GroupCreateLogic) GroupCreate(req *types.GroupCreateReq) (resp *types.G
 	if err := l.svcCtx.GroupRepo.Create(l.ctx, g); err != nil {
 		return nil, err
 	}
-	return &types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: 0, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()}, nil
+	return &types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: 0, LayoutPosition: g.LayoutPosition, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()}, nil
 }

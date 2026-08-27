@@ -44,6 +44,14 @@ func (l *GroupRankingLogic) GroupRanking(req *types.RankingReq) (resp *types.Gro
 	if err != nil {
 		return nil, err
 	}
+	groups, err := l.svcCtx.GroupRepo.List(l.ctx)
+	if err != nil {
+		return nil, err
+	}
+	layoutPositions := make(map[int64]int64, len(groups))
+	for _, group := range groups {
+		layoutPositions[group.ID] = group.LayoutPosition
+	}
 
 	topN := req.TopN
 	if topN <= 0 {
@@ -83,9 +91,10 @@ func (l *GroupRankingLogic) GroupRanking(req *types.RankingReq) (resp *types.Gro
 			Rank:      rank,
 			Highlight: highlight,
 			Group: types.GroupResp{
-				Id:       row.GroupID,
-				Name:     row.GroupName,
-				AvgScore: row.Score,
+				Id:             row.GroupID,
+				Name:           row.GroupName,
+				AvgScore:       row.Score,
+				LayoutPosition: layoutPositions[row.GroupID],
 			},
 			Score: row.Score,
 		})

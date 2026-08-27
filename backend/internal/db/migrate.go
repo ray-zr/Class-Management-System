@@ -43,6 +43,29 @@ func AutoMigrate(ctx context.Context, gdb *gorm.DB) error {
 	)
 }
 
+func NormalizeGroupLayoutPositions(ctx context.Context, gdb *gorm.DB) error {
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var groups []model.Group
+		if err := tx.
+			Order("CASE WHEN layout_position > 0 THEN 0 ELSE 1 END").
+			Order("layout_position asc").
+			Order("id asc").
+			Find(&groups).Error; err != nil {
+			return err
+		}
+		for index, group := range groups {
+			position := int64(index + 1)
+			if group.LayoutPosition == position {
+				continue
+			}
+			if err := tx.Model(&model.Group{}).Where("id = ?", group.ID).Update("layout_position", position).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func BackfillScoreEntrySnapshots(ctx context.Context, gdb *gorm.DB) error {
 	return gdb.WithContext(ctx).Exec(`
 		UPDATE score_entries e

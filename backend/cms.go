@@ -51,6 +51,9 @@ func main() {
 	if err := db.AutoMigrate(context.Background(), ctx.DB); err != nil {
 		panic(err)
 	}
+	if err := db.NormalizeGroupLayoutPositions(context.Background(), ctx.DB); err != nil {
+		panic(err)
+	}
 	if err := db.BackfillScoreEntrySnapshots(context.Background(), ctx.DB); err != nil {
 		panic(err)
 	}

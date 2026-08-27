@@ -27,6 +27,15 @@ type GroupCreateReq struct {
 	Name string `json:"name"`
 }
 
+type GroupLayoutItem struct {
+	Id       int64 `json:"id"`
+	Position int64 `json:"position"`
+}
+
+type GroupLayoutUpdateReq struct {
+	Items []GroupLayoutItem `json:"items"`
+}
+
 type GroupListResp struct {
 	Items []GroupResp `json:"items"`
 }
@@ -43,11 +52,12 @@ type GroupRankingResp struct {
 }
 
 type GroupResp struct {
-	Id        int64   `json:"id"`
-	Name      string  `json:"name"`
-	AvgScore  float64 `json:"avgScore"`
-	CreatedAt int64   `json:"createdAt"`
-	UpdatedAt int64   `json:"updatedAt"`
+	Id             int64   `json:"id"`
+	Name           string  `json:"name"`
+	AvgScore       float64 `json:"avgScore"`
+	LayoutPosition int64   `json:"layoutPosition"`
+	CreatedAt      int64   `json:"createdAt"`
+	UpdatedAt      int64   `json:"updatedAt"`
 }
 
 type GroupUpdateReq struct {

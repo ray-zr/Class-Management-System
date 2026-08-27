@@ -46,5 +46,5 @@ func (l *GroupUpdateLogic) GroupUpdate(id int64, req *types.GroupUpdateReq) (res
 	if err != nil {
 		return nil, err
 	}
-	return &types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: avg, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()}, nil
+	return &types.GroupResp{Id: g.ID, Name: g.Name, AvgScore: avg, LayoutPosition: g.LayoutPosition, CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix()}, nil
 }

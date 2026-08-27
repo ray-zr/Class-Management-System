@@ -65,6 +65,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Handler: GroupDeleteHandler(serverCtx),
 			},
 			{
+				Method:  http.MethodPut,
+				Path:    "/groups/layout",
+				Handler: GroupLayoutUpdateHandler(serverCtx),
+			},
+			{
 				Method:  http.MethodGet,
 				Path:    "/health",
 				Handler: HealthHandler(serverCtx),
